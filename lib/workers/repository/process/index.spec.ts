@@ -1,12 +1,6 @@
-import {
-  RenovateConfig,
-  getConfig,
-  git,
-  logger,
-  mocked,
-  platform,
-  scm,
-} from '../../../../test/util';
+import type { RenovateConfig } from '../../../../test/util';
+import { git, logger, mocked, platform, scm } from '../../../../test/util';
+import { getConfig } from '../../../config/defaults';
 import { GlobalConfig } from '../../../config/global';
 import { CONFIG_VALIDATION } from '../../../constants/error-messages';
 import { addMeta } from '../../../logger';
@@ -23,7 +17,6 @@ const extract = mocked(_extractUpdate).extract;
 let config: RenovateConfig;
 
 beforeEach(() => {
-  jest.resetAllMocks();
   config = getConfig();
 });
 
@@ -65,13 +58,15 @@ describe('workers/repository/process/index', () => {
       expect(platform.getJsonFile).not.toHaveBeenCalledWith(
         'renovate.json',
         undefined,
-        'dev'
+        'dev',
       );
     });
 
     it('reads config from branches in baseBranches if useBaseBranchConfig specified', async () => {
       scm.branchExists.mockResolvedValue(true);
-      platform.getJsonFile = jest.fn().mockResolvedValue({});
+      platform.getJsonFile = jest
+        .fn()
+        .mockResolvedValue({ extends: [':approveMajorUpdates'] });
       config.baseBranches = ['master', 'dev'];
       config.useBaseBranchConfig = 'merge';
       getCache().configFileName = 'renovate.json';
@@ -84,7 +79,7 @@ describe('workers/repository/process/index', () => {
       expect(platform.getJsonFile).toHaveBeenCalledWith(
         'renovate.json',
         undefined,
-        'dev'
+        'dev',
       );
       expect(addMeta).toHaveBeenNthCalledWith(1, { baseBranch: 'master' });
       expect(addMeta).toHaveBeenNthCalledWith(2, { baseBranch: 'dev' });
@@ -104,7 +99,7 @@ describe('workers/repository/process/index', () => {
       config.baseBranches = ['master', 'dev'];
       config.useBaseBranchConfig = 'merge';
       await expect(extractDependencies(config)).rejects.toThrow(
-        CONFIG_VALIDATION
+        CONFIG_VALIDATION,
       );
       expect(addMeta).toHaveBeenNthCalledWith(1, { baseBranch: 'master' });
       expect(addMeta).toHaveBeenNthCalledWith(2, { baseBranch: 'dev' });
@@ -125,10 +120,11 @@ describe('workers/repository/process/index', () => {
 
     it('finds baseBranches via regular expressions', async () => {
       extract.mockResolvedValue({} as never);
-      config.baseBranches = ['/^release\\/.*/', 'dev', '!/^pre-release\\/.*/'];
+      config.baseBranches = ['/^release\\/.*/i', 'dev', '!/^pre-release\\/.*/'];
       git.getBranchList.mockReturnValue([
         'dev',
         'pre-release/v0',
+        'RELEASE/v0',
         'release/v1',
         'release/v2',
         'some-other',
@@ -136,19 +132,43 @@ describe('workers/repository/process/index', () => {
       scm.branchExists.mockResolvedValue(true);
       const res = await extractDependencies(config);
       expect(res).toStrictEqual({
-        branchList: [undefined, undefined, undefined, undefined],
-        branches: [undefined, undefined, undefined, undefined],
+        branchList: [undefined, undefined, undefined, undefined, undefined],
+        branches: [undefined, undefined, undefined, undefined, undefined],
         packageFiles: undefined,
       });
 
       expect(logger.logger.debug).toHaveBeenCalledWith(
-        { baseBranches: ['release/v1', 'release/v2', 'dev', 'some-other'] },
-        'baseBranches'
+        {
+          baseBranches: [
+            'RELEASE/v0',
+            'release/v1',
+            'release/v2',
+            'dev',
+            'some-other',
+          ],
+        },
+        'baseBranches',
       );
+      expect(addMeta).toHaveBeenCalledWith({ baseBranch: 'RELEASE/v0' });
       expect(addMeta).toHaveBeenCalledWith({ baseBranch: 'release/v1' });
       expect(addMeta).toHaveBeenCalledWith({ baseBranch: 'release/v2' });
       expect(addMeta).toHaveBeenCalledWith({ baseBranch: 'dev' });
       expect(addMeta).toHaveBeenCalledWith({ baseBranch: 'some-other' });
+    });
+
+    it('maps $default to defaultBranch', async () => {
+      extract.mockResolvedValue({} as never);
+      config.baseBranches = ['$default'];
+      config.defaultBranch = 'master';
+      git.getBranchList.mockReturnValue(['dev', 'master']);
+      scm.branchExists.mockResolvedValue(true);
+      const res = await extractDependencies(config);
+      expect(res).toStrictEqual({
+        branchList: [undefined],
+        branches: [undefined],
+        packageFiles: undefined,
+      });
+      expect(addMeta).toHaveBeenCalledWith({ baseBranch: 'master' });
     });
   });
 });

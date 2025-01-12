@@ -1,5 +1,4 @@
-// TODO: types (#7154)
-/* eslint-disable @typescript-eslint/restrict-template-expressions */
+// TODO: types (#22198)
 import is from '@sindresorhus/is';
 import { logger } from '../../../logger';
 import { ExternalHostError } from '../../../types/errors/external-host-error';
@@ -43,12 +42,20 @@ export class TerraformProviderDatasource extends TerraformDatasource {
 
   override readonly registryStrategy = 'hunt';
 
+  override readonly releaseTimestampSupport = true;
+  override readonly releaseTimestampNote =
+    'The release timestamp is only supported for the latest version, and is determined from the `published_at` field in the results.';
+  override readonly sourceUrlSupport = 'package';
+  override readonly sourceUrlNote =
+    'The source URL is determined from the the `source` field in the results.';
+
   @cache({
     namespace: `datasource-${TerraformProviderDatasource.id}`,
-    key: (getReleasesConfig: GetReleasesConfig) =>
-      `${
-        getReleasesConfig.registryUrl
-      }/${TerraformProviderDatasource.getRepository(getReleasesConfig)}`,
+    key: (getReleasesConfig: GetReleasesConfig) => {
+      const url = getReleasesConfig.registryUrl;
+      const repo = TerraformProviderDatasource.getRepository(getReleasesConfig);
+      return `getReleases:${url}/${repo}`;
+    },
   })
   async getReleases({
     packageName,
@@ -59,7 +66,7 @@ export class TerraformProviderDatasource extends TerraformDatasource {
       return null;
     }
     logger.trace(
-      `terraform-provider.getDependencies() packageName: ${packageName}`
+      `terraform-provider.getDependencies() packageName: ${packageName}`,
     );
 
     if (registryUrl === this.defaultRegistryUrls[1]) {
@@ -68,22 +75,21 @@ export class TerraformProviderDatasource extends TerraformDatasource {
     const repository = TerraformProviderDatasource.getRepository({
       packageName,
     });
-    const serviceDiscovery = await this.getTerraformServiceDiscoveryResult(
-      registryUrl
-    );
+    const serviceDiscovery =
+      await this.getTerraformServiceDiscoveryResult(registryUrl);
 
     if (registryUrl === this.defaultRegistryUrls[0]) {
       return await this.queryRegistryExtendedApi(
         serviceDiscovery,
         registryUrl,
-        repository
+        repository,
       );
     }
 
     return await this.queryRegistryVersions(
       serviceDiscovery,
       registryUrl,
-      repository
+      repository,
     );
   }
 
@@ -99,13 +105,13 @@ export class TerraformProviderDatasource extends TerraformDatasource {
   private async queryRegistryExtendedApi(
     serviceDiscovery: ServiceDiscoveryResult,
     registryUrl: string,
-    repository: string
+    repository: string,
   ): Promise<ReleaseResult> {
     const backendURL = createSDBackendURL(
       registryUrl,
       'providers.v1',
       serviceDiscovery,
-      repository
+      repository,
     );
     const res = (await this.http.getJson<TerraformProvider>(backendURL)).body;
     const dep: ReleaseResult = {
@@ -118,7 +124,7 @@ export class TerraformProviderDatasource extends TerraformDatasource {
     }
     // set published date for latest release
     const latestVersion = dep.releases.find(
-      (release) => res.version === release.version
+      (release) => res.version === release.version,
     );
     // istanbul ignore else
     if (latestVersion) {
@@ -135,13 +141,13 @@ export class TerraformProviderDatasource extends TerraformDatasource {
   private async queryRegistryVersions(
     serviceDiscovery: ServiceDiscoveryResult,
     registryUrl: string,
-    repository: string
+    repository: string,
   ): Promise<ReleaseResult> {
     const backendURL = createSDBackendURL(
       registryUrl,
       'providers.v1',
       serviceDiscovery,
-      `${repository}/versions`
+      `${repository}/versions`,
     );
     const res = (await this.http.getJson<TerraformProviderVersions>(backendURL))
       .body;
@@ -155,14 +161,14 @@ export class TerraformProviderDatasource extends TerraformDatasource {
 
   private async queryReleaseBackend(
     packageName: string,
-    registryURL: string
+    registryURL: string,
   ): Promise<ReleaseResult | null> {
     const hashicorpPackage = packageName.replace('hashicorp/', '');
     const backendLookUpName = `terraform-provider-${hashicorpPackage}`;
     const backendURL = joinUrlParts(
       registryURL,
       backendLookUpName,
-      `index.json`
+      `index.json`,
     );
     const res = (
       await this.http.getJson<TerraformProviderReleaseBackend>(backendURL)
@@ -174,21 +180,21 @@ export class TerraformProviderDatasource extends TerraformDatasource {
       })),
       sourceUrl: joinUrlParts(
         'https://github.com/terraform-providers',
-        backendLookUpName
+        backendLookUpName,
       ),
     };
     return dep;
   }
 
   @cache({
-    namespace: `datasource-${TerraformProviderDatasource.id}-builds`,
+    namespace: `datasource-${TerraformProviderDatasource.id}`,
     key: (registryURL: string, repository: string, version: string) =>
-      `${registryURL}/${repository}/${version}`,
+      `getBuilds:${registryURL}/${repository}/${version}`,
   })
   async getBuilds(
     registryURL: string,
     repository: string,
-    version: string
+    version: string,
   ): Promise<TerraformBuild[] | null> {
     if (registryURL === TerraformProviderDatasource.defaultRegistryUrls[1]) {
       // check if registryURL === secondary backend
@@ -204,7 +210,7 @@ export class TerraformProviderDatasource extends TerraformDatasource {
       try {
         versionReleaseBackend = await this.getReleaseBackendIndex(
           backendLookUpName,
-          version
+          version,
         );
       } catch (err) {
         /* istanbul ignore next */
@@ -213,7 +219,7 @@ export class TerraformProviderDatasource extends TerraformDatasource {
         }
         logger.debug(
           { err, backendLookUpName, version },
-          `Failed to retrieve builds for ${backendLookUpName} ${version}`
+          `Failed to retrieve builds for ${backendLookUpName} ${version}`,
         );
         return null;
       }
@@ -221,9 +227,8 @@ export class TerraformProviderDatasource extends TerraformDatasource {
     }
 
     // check public or private Terraform registry
-    const serviceDiscovery = await this.getTerraformServiceDiscoveryResult(
-      registryURL
-    );
+    const serviceDiscovery =
+      await this.getTerraformServiceDiscoveryResult(registryURL);
     if (!serviceDiscovery) {
       logger.trace(`Failed to retrieve service discovery from ${registryURL}`);
       return null;
@@ -232,11 +237,11 @@ export class TerraformProviderDatasource extends TerraformDatasource {
       registryURL,
       'providers.v1',
       serviceDiscovery,
-      repository
+      repository,
     );
     const versionsResponse = (
       await this.http.getJson<TerraformRegistryVersions>(
-        `${backendURL}/versions`
+        `${backendURL}/versions`,
       )
     ).body;
     if (!versionsResponse.versions) {
@@ -244,11 +249,11 @@ export class TerraformProviderDatasource extends TerraformDatasource {
       return null;
     }
     const builds = versionsResponse.versions.find(
-      (value) => value.version === version
+      (value) => value.version === version,
     );
     if (!builds) {
       logger.trace(
-        `No builds found for ${repository}:${version} on ${registryURL}`
+        `No builds found for ${repository}:${version} on ${registryURL}`,
       );
       return null;
     }
@@ -276,7 +281,7 @@ export class TerraformProviderDatasource extends TerraformDatasource {
           return null;
         }
       },
-      { concurrency: 4 }
+      { concurrency: 4 },
     );
 
     const filteredResult = result.filter(is.truthy);
@@ -284,17 +289,44 @@ export class TerraformProviderDatasource extends TerraformDatasource {
   }
 
   @cache({
-    namespace: `datasource-${TerraformProviderDatasource.id}-releaseBackendIndex`,
+    namespace: `datasource-${TerraformProviderDatasource.id}`,
+    key: (zipHashUrl: string) => `getZipHashes:${zipHashUrl}`,
+  })
+  async getZipHashes(zipHashUrl: string): Promise<string[] | undefined> {
+    // The hashes are formatted as the result of sha256sum in plain text, each line: <hash>\t<filename>
+    let rawHashData: string;
+    try {
+      rawHashData = (await this.http.get(zipHashUrl)).body;
+    } catch (err) {
+      /* istanbul ignore next */
+      if (err instanceof ExternalHostError) {
+        throw err;
+      }
+      logger.debug(
+        { err, zipHashUrl },
+        `Failed to retrieve zip hashes from ${zipHashUrl}`,
+      );
+      return undefined;
+    }
+
+    return rawHashData
+      .trimEnd()
+      .split('\n')
+      .map((line) => line.split(/\s/)[0]);
+  }
+
+  @cache({
+    namespace: `datasource-${TerraformProviderDatasource.id}`,
     key: (backendLookUpName: string, version: string) =>
-      `${backendLookUpName}/${version}`,
+      `getReleaseBackendIndex:${backendLookUpName}/${version}`,
   })
   async getReleaseBackendIndex(
     backendLookUpName: string,
-    version: string
+    version: string,
   ): Promise<VersionDetailResponse> {
     return (
       await this.http.getJson<VersionDetailResponse>(
-        `${TerraformProviderDatasource.defaultRegistryUrls[1]}/${backendLookUpName}/${version}/index.json`
+        `${TerraformProviderDatasource.defaultRegistryUrls[1]}/${backendLookUpName}/${version}/index.json`,
       )
     ).body;
   }

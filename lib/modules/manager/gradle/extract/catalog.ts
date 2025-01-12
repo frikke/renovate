@@ -1,9 +1,9 @@
-import { parse } from '@iarna/toml';
 import is from '@sindresorhus/is';
 import deepmerge from 'deepmerge';
 import type { SkipReason } from '../../../../types';
 import { hasKey } from '../../../../util/object';
 import { escapeRegExp, regEx } from '../../../../util/regex';
+import { parse as parseToml } from '../../../../util/toml';
 import type { PackageDependency } from '../../types';
 import type {
   GradleCatalog,
@@ -18,12 +18,12 @@ import type {
 function findVersionIndex(
   content: string,
   depName: string,
-  version: string
+  version: string,
 ): number {
   const eDn = escapeRegExp(depName);
   const eVer = escapeRegExp(version);
   const re = regEx(
-    `(?:id\\s*=\\s*)?['"]?${eDn}["']?(?:(?:\\s*=\\s*)|:|,\\s*)(?:.*version(?:\\.ref)?(?:\\s*\\=\\s*))?["']?${eVer}['"]?`
+    `(?:id\\s*=\\s*)?['"]?${eDn}["']?(?:(?:\\s*=\\s*)|:|,\\s*)(?:.*version(?:\\.ref)?(?:\\s*\\=\\s*))?["']?${eVer}['"]?`,
   );
   const match = re.exec(content);
   if (match) {
@@ -37,26 +37,40 @@ function findVersionIndex(
 function findIndexAfter(
   content: string,
   sliceAfter: string,
-  find: string
+  find: string,
 ): number {
   const slicePoint = content.indexOf(sliceAfter) + sliceAfter.length;
   return slicePoint + content.slice(slicePoint).indexOf(find);
 }
 
 function isArtifactDescriptor(
-  obj: GradleCatalogArtifactDescriptor | GradleCatalogModuleDescriptor
+  obj: GradleCatalogArtifactDescriptor | GradleCatalogModuleDescriptor,
 ): obj is GradleCatalogArtifactDescriptor {
   return hasKey('group', obj);
 }
 
 function isVersionPointer(
-  obj: GradleVersionCatalogVersion | undefined
+  obj: GradleVersionCatalogVersion | undefined,
 ): obj is VersionPointer {
   return hasKey('ref', obj);
 }
 
-function normalizeVersionPointer(versionPointer: string): string {
-  return versionPointer.replace(regEx(/[._]/g), '-');
+function normalizeAlias(alias: string): string {
+  return alias.replace(regEx(/[-_]/g), '.');
+}
+
+function findOriginalAlias(
+  versions: Record<string, GradleVersionPointerTarget>,
+  alias: string,
+): string {
+  const normalizedAlias = normalizeAlias(alias);
+  for (const sectionKey of Object.keys(versions)) {
+    if (normalizeAlias(sectionKey) === normalizedAlias) {
+      return sectionKey;
+    }
+  }
+
+  return alias;
 }
 
 interface VersionExtract {
@@ -83,13 +97,12 @@ function extractVersion({
   versionSubContent: string;
 }): VersionExtract {
   if (isVersionPointer(version)) {
-    const parsedVersion = normalizeVersionPointer(version.ref);
-    // everything else is ignored
+    const originalAlias = findOriginalAlias(versions, version.ref);
     return extractLiteralVersion({
-      version: versions[parsedVersion],
+      version: versions[originalAlias],
       depStartIndex: versionStartIndex,
       depSubContent: versionSubContent,
-      sectionKey: parsedVersion,
+      sectionKey: originalAlias,
     });
   } else {
     return extractLiteralVersion({
@@ -184,7 +197,6 @@ function extractDependency({
     }
     return {
       depName: `${groupName}:${name}`,
-      groupName,
       currentValue,
       managerData: {
         fileReplacePosition:
@@ -209,35 +221,32 @@ function extractDependency({
       skipReason,
     };
   }
-  const versionRef = isVersionPointer(descriptor.version)
-    ? normalizeVersionPointer(descriptor.version.ref)
-    : null;
-  if (isArtifactDescriptor(descriptor)) {
-    const { group, name } = descriptor;
-    const groupName = is.nullOrUndefined(versionRef) ? group : versionRef; // usage of common variable should have higher priority than other values
-    return {
-      depName: `${group}:${name}`,
-      groupName,
-      currentValue,
-      managerData: { fileReplacePosition },
-    };
-  }
-  const [depGroupName, name] = descriptor.module.split(':');
-  const groupName = is.nullOrUndefined(versionRef) ? depGroupName : versionRef;
-  const dependency = {
-    depName: `${depGroupName}:${name}`,
-    groupName,
+
+  const dependency: PackageDependency<GradleManagerData> = {
     currentValue,
     managerData: { fileReplacePosition },
   };
+
+  if (isArtifactDescriptor(descriptor)) {
+    const { group, name } = descriptor;
+    dependency.depName = `${group}:${name}`;
+  } else {
+    const [depGroupName, name] = descriptor.module.split(':');
+    dependency.depName = `${depGroupName}:${name}`;
+  }
+
+  if (isVersionPointer(descriptor.version)) {
+    dependency.groupName = normalizeAlias(descriptor.version.ref);
+  }
+
   return dependency;
 }
 
 export function parseCatalog(
   packageFile: string,
-  content: string
+  content: string,
 ): PackageDependency<GradleManagerData>[] {
-  const tomlContent = parse(content) as GradleCatalog;
+  const tomlContent = parseToml(content) as GradleCatalog;
   const versions = tomlContent.versions ?? {};
   const libs = tomlContent.libraries ?? {};
   const libStartIndex = content.indexOf('libraries');
@@ -289,7 +298,7 @@ export function parseCatalog(
       dependency.skipReason = skipReason;
     }
     if (isVersionPointer(version) && dependency.commitMessageTopic) {
-      dependency.groupName = normalizeVersionPointer(version.ref);
+      dependency.groupName = normalizeAlias(version.ref);
       delete dependency.commitMessageTopic;
     }
 

@@ -1,10 +1,6 @@
 import { Fixtures } from '../../../../test/fixtures';
-import {
-  RenovateConfig,
-  getConfig,
-  mockedFunction,
-  partial,
-} from '../../../../test/util';
+import type { RenovateConfig } from '../../../../test/util';
+import { mockedFunction, partial } from '../../../../test/util';
 import { logger } from '../../../logger';
 import { platform } from '../../../modules/platform';
 import * as cache from '../../../util/cache/repository';
@@ -32,9 +28,12 @@ describe('workers/repository/finalize/repository-statistics', () => {
 
   describe('runRenovateRepoStats', () => {
     beforeEach(() => {
-      config = getConfig();
       mockedFunction(platform.getPrList).mockReturnValue(prJson);
-      config.repository = 'owner/repo';
+      config = partial<RenovateConfig>({
+        onboardingPrTitle: 'Configure Renovate',
+        defaultBranch: 'main',
+        repository: 'owner/repo',
+      });
     });
 
     it('Calls runRenovateRepoStats', () => {
@@ -49,7 +48,7 @@ describe('workers/repository/finalize/repository-statistics', () => {
             merged: 1,
           },
         },
-        `Renovate repository PR statistics`
+        `Renovate repository PR statistics`,
       );
     });
   });
@@ -86,7 +85,7 @@ describe('workers/repository/finalize/repository-statistics', () => {
           branches: [],
           inactiveBranches: [],
         },
-        `Branch summary`
+        `Branch summary`,
       );
     });
 
@@ -151,7 +150,7 @@ describe('workers/repository/finalize/repository-statistics', () => {
           defaultBranch,
           inactiveBranches: ['b3'],
         },
-        `Branch summary`
+        `Branch summary`,
       );
     });
 
@@ -176,7 +175,6 @@ describe('workers/repository/finalize/repository-statistics', () => {
 
       const branches: BranchCache[] = [{ ...branchCache, branchName: 'b1' }];
       const cache = partial<RepoCacheData>({
-        scan: {},
         branches,
       });
       getCacheSpy.mockReturnValueOnce(cache);

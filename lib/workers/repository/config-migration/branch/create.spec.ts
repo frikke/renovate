@@ -1,6 +1,8 @@
 import type { Indent } from 'detect-indent';
 import { Fixtures } from '../../../../../test/fixtures';
-import { RenovateConfig, getConfig, partial } from '../../../../../test/util';
+import type { RenovateConfig } from '../../../../../test/util';
+import { partial } from '../../../../../test/util';
+import { getConfig } from '../../../../config/defaults';
 import { scm } from '../../../../modules/platform/scm';
 import { createConfigMigrationBranch } from './create';
 import { MigratedDataFactory } from './migrated-data';
@@ -15,7 +17,7 @@ describe('workers/repository/config-migration/branch/create', () => {
   const filename = 'renovate.json';
   const prettierSpy = jest.spyOn(
     MigratedDataFactory,
-    'applyPrettierFormatting'
+    'applyPrettierFormatting',
   );
 
   let config: RenovateConfig;
@@ -48,7 +50,8 @@ describe('workers/repository/config-migration/branch/create', () => {
           },
         ],
         message: 'Migrate config renovate.json',
-        platformCommit: false,
+        platformCommit: 'auto',
+        force: true,
       });
     });
 
@@ -71,7 +74,8 @@ describe('workers/repository/config-migration/branch/create', () => {
           },
         ],
         message,
-        platformCommit: false,
+        platformCommit: 'auto',
+        force: true,
       });
     });
 
@@ -95,7 +99,8 @@ describe('workers/repository/config-migration/branch/create', () => {
             },
           ],
           message,
-          platformCommit: false,
+          platformCommit: 'auto',
+          force: true,
         });
       });
     });
@@ -120,7 +125,8 @@ describe('workers/repository/config-migration/branch/create', () => {
             },
           ],
           message,
-          platformCommit: false,
+          platformCommit: 'auto',
+          force: true,
         });
       });
     });
@@ -146,7 +152,8 @@ describe('workers/repository/config-migration/branch/create', () => {
             },
           ],
           message,
-          platformCommit: false,
+          platformCommit: 'auto',
+          force: true,
         });
       });
 
@@ -171,7 +178,8 @@ describe('workers/repository/config-migration/branch/create', () => {
             },
           ],
           message,
-          platformCommit: false,
+          platformCommit: 'auto',
+          force: true,
         });
       });
     });

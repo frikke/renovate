@@ -16,7 +16,6 @@ module.exports = {
     'plugin:@typescript-eslint/recommended-requiring-type-checking',
     'plugin:promise/recommended',
     'plugin:jest-formatting/recommended',
-    'prettier',
   ],
   parserOptions: {
     ecmaVersion: 9,
@@ -91,6 +90,10 @@ module.exports = {
       'error',
       { assertionStyle: 'as', objectLiteralTypeAssertions: 'allow' },
     ],
+    '@typescript-eslint/consistent-type-imports': [
+      'error',
+      { disallowTypeAnnotations: false },
+    ],
 
     // Makes no sense to allow type inference for expression parameters, but require typing the response
     '@typescript-eslint/explicit-function-return-type': [
@@ -100,7 +103,7 @@ module.exports = {
 
     // TODO: fix lint
     '@typescript-eslint/no-explicit-any': 0,
-    // TODO: https://github.com/renovatebot/renovate/issues/7154
+    // TODO: https://github.com/renovatebot/renovate/discussions/22198
     '@typescript-eslint/no-non-null-assertion': 0,
     '@typescript-eslint/no-unused-vars': [
       2,
@@ -138,7 +141,10 @@ module.exports = {
     ],
 
     '@typescript-eslint/unbound-method': [2, { ignoreStatic: true }],
-    '@typescript-eslint/ban-types': 2,
+    '@typescript-eslint/no-empty-object-type': [
+      2,
+      { allowInterfaces: 'with-single-extends' },
+    ],
     '@renovate/jest-root-describe': 2,
 
     'typescript-enum/no-const-enum': 2,
@@ -223,6 +229,15 @@ module.exports = {
       rules: {
         // esm always requires extensions
         'import/extensions': 0,
+      },
+    },
+    {
+      files: ['tools/docs/test/**/*.mjs'],
+      env: {
+        jest: false,
+      },
+      rules: {
+        '@typescript-eslint/no-floating-promises': 0,
       },
     },
   ],

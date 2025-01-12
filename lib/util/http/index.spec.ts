@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { ZodError, z } from 'zod';
 import * as httpMock from '../../../test/http-mock';
 import { logger } from '../../../test/util';
 import {
@@ -6,11 +6,12 @@ import {
   HOST_DISABLED,
 } from '../../constants/error-messages';
 import * as memCache from '../cache/memory';
+import { resetCache } from '../cache/repository';
 import * as hostRules from '../host-rules';
 import * as queue from './queue';
 import * as throttle from './throttle';
 import type { HttpResponse } from './types';
-import { Http } from '.';
+import { Http, HttpError } from '.';
 
 const baseUrl = 'http://renovate.com';
 
@@ -22,6 +23,7 @@ describe('util/http/index', () => {
     hostRules.clear();
     queue.clear();
     throttle.clear();
+    resetCache();
   });
 
   it('get', async () => {
@@ -38,7 +40,7 @@ describe('util/http/index', () => {
   it('returns 429 error', async () => {
     httpMock.scope(baseUrl).get('/test').reply(429);
     await expect(http.get('http://renovate.com/test')).rejects.toThrow(
-      'Response code 429 (Too Many Requests)'
+      'Response code 429 (Too Many Requests)',
     );
     expect(httpMock.allUsed()).toBeTrue();
   });
@@ -47,7 +49,7 @@ describe('util/http/index', () => {
     httpMock.scope(baseUrl).get('/test').reply(404);
     hostRules.add({ abortOnError: true });
     await expect(http.get('http://renovate.com/test')).rejects.toThrow(
-      EXTERNAL_HOST_ERROR
+      EXTERNAL_HOST_ERROR,
     );
     expect(httpMock.allUsed()).toBeTrue();
   });
@@ -55,7 +57,7 @@ describe('util/http/index', () => {
   it('disables hosts', async () => {
     hostRules.add({ matchHost: 'renovate.com', enabled: false });
     await expect(http.get('http://renovate.com/test')).rejects.toThrow(
-      HOST_DISABLED
+      HOST_DISABLED,
     );
   });
 
@@ -63,7 +65,7 @@ describe('util/http/index', () => {
     httpMock.scope(baseUrl).get('/test').reply(404);
     hostRules.add({ abortOnError: true, abortIgnoreStatusCodes: [404] });
     await expect(http.get('http://renovate.com/test')).rejects.toThrow(
-      'Response code 404 (Not Found)'
+      'Response code 404 (Not Found)',
     );
     expect(httpMock.allUsed()).toBeTrue();
   });
@@ -76,13 +78,18 @@ describe('util/http/index', () => {
         },
       })
       .get('/')
-      .reply(200, '{ "test": true }');
-    expect(await http.getJson('http://renovate.com')).toEqual({
+      .reply(200, '{ "test": true }', { etag: 'abc123' });
+
+    const res = await http.getJson('http://renovate.com');
+
+    expect(res).toEqual({
       authorization: false,
       body: {
         test: true,
       },
-      headers: {},
+      headers: {
+        etag: 'abc123',
+      },
       statusCode: 200,
     });
   });
@@ -90,7 +97,7 @@ describe('util/http/index', () => {
   it('postJson', async () => {
     httpMock.scope(baseUrl).post('/').reply(200, {});
     expect(
-      await http.postJson('http://renovate.com', { body: {}, baseUrl })
+      await http.postJson('http://renovate.com', { body: {}, baseUrl }),
     ).toEqual({
       authorization: false,
       body: {},
@@ -105,7 +112,7 @@ describe('util/http/index', () => {
   it('putJson', async () => {
     httpMock.scope(baseUrl).put('/').reply(200, {});
     expect(
-      await http.putJson('http://renovate.com', { body: {}, baseUrl })
+      await http.putJson('http://renovate.com', { body: {}, baseUrl }),
     ).toEqual({
       authorization: false,
       body: {},
@@ -120,7 +127,7 @@ describe('util/http/index', () => {
   it('patchJson', async () => {
     httpMock.scope(baseUrl).patch('/').reply(200, {});
     expect(
-      await http.patchJson('http://renovate.com', { body: {}, baseUrl })
+      await http.patchJson('http://renovate.com', { body: {}, baseUrl }),
     ).toEqual({
       authorization: false,
       body: {},
@@ -135,7 +142,7 @@ describe('util/http/index', () => {
   it('deleteJson', async () => {
     httpMock.scope(baseUrl).delete('/').reply(200, {});
     expect(
-      await http.deleteJson('http://renovate.com', { body: {}, baseUrl })
+      await http.deleteJson('http://renovate.com', { body: {}, baseUrl }),
     ).toEqual({
       authorization: false,
       body: {},
@@ -189,32 +196,8 @@ describe('util/http/index', () => {
     hostRules.add({ matchHost: 'renovate.com', enabled: false });
 
     expect(() => http.stream('http://renovate.com/test')).toThrow(
-      HOST_DISABLED
+      HOST_DISABLED,
     );
-  });
-
-  it('retries', async () => {
-    const NODE_ENV = process.env.NODE_ENV;
-    try {
-      delete process.env.NODE_ENV;
-      httpMock
-        .scope(baseUrl)
-        .head('/')
-        .reply(500)
-        .head('/')
-        .reply(200, undefined, { 'x-some-header': 'abc' });
-      expect(await http.head('http://renovate.com')).toEqual({
-        authorization: false,
-        body: '',
-        headers: {
-          'x-some-header': 'abc',
-        },
-        statusCode: 200,
-      });
-      expect(httpMock.allUsed()).toBeTrue();
-    } finally {
-      process.env.NODE_ENV = NODE_ENV;
-    }
   });
 
   it('limits concurrency by host', async () => {
@@ -314,13 +297,44 @@ describe('util/http/index', () => {
     expect(res?.body.toString('utf-8')).toBe('test');
   });
 
+  describe('retry', () => {
+    let NODE_ENV: string | undefined;
+
+    beforeAll(() => {
+      NODE_ENV = process.env.NODE_ENV;
+      delete process.env.NODE_ENV;
+      http = new Http('dummy');
+    });
+
+    afterAll(() => {
+      process.env.NODE_ENV = NODE_ENV;
+    });
+
+    it('works', async () => {
+      httpMock
+        .scope(baseUrl)
+        .head('/')
+        .reply(500)
+        .head('/')
+        .reply(200, undefined, { 'x-some-header': 'abc' });
+      expect(await http.head('http://renovate.com')).toEqual({
+        authorization: false,
+        body: '',
+        headers: {
+          'x-some-header': 'abc',
+        },
+        statusCode: 200,
+      });
+      expect(httpMock.allUsed()).toBeTrue();
+    });
+  });
+
   describe('Schema support', () => {
     const SomeSchema = z
       .object({ x: z.number(), y: z.number() })
       .transform(({ x, y }) => `${x} + ${y} = ${x + y}`);
 
     beforeEach(() => {
-      jest.resetAllMocks();
       memCache.init();
     });
 
@@ -342,7 +356,7 @@ describe('util/http/index', () => {
         const { body }: HttpResponse<string> = await http.getJson(
           'http://renovate.com',
           { headers: { accept: 'application/json' } },
-          SomeSchema
+          SomeSchema,
         );
 
         expect(body).toBe('2 + 2 = 4');
@@ -360,8 +374,49 @@ describe('util/http/index', () => {
           .reply(200, JSON.stringify({ foo: 'bar' }));
 
         await expect(
-          http.getJson('http://renovate.com', SomeSchema)
+          http.getJson('http://renovate.com', SomeSchema),
         ).rejects.toThrow(z.ZodError);
+      });
+    });
+
+    describe('getJsonSafe', () => {
+      it('uses schema for response body', async () => {
+        httpMock
+          .scope('http://example.com')
+          .get('/')
+          .reply(200, JSON.stringify({ x: 2, y: 2 }));
+
+        const { val, err } = await http
+          .getJsonSafe('http://example.com', SomeSchema)
+          .unwrap();
+
+        expect(val).toBe('2 + 2 = 4');
+        expect(err).toBeUndefined();
+      });
+
+      it('returns schema error result', async () => {
+        httpMock
+          .scope('http://example.com')
+          .get('/')
+          .reply(200, JSON.stringify({ x: '2', y: '2' }));
+
+        const { val, err } = await http
+          .getJsonSafe('http://example.com', SomeSchema)
+          .unwrap();
+
+        expect(val).toBeUndefined();
+        expect(err).toBeInstanceOf(ZodError);
+      });
+
+      it('returns error result', async () => {
+        httpMock.scope('http://example.com').get('/').replyWithError('unknown');
+
+        const { val, err } = await http
+          .getJsonSafe('http://example.com', SomeSchema)
+          .unwrap();
+
+        expect(val).toBeUndefined();
+        expect(err).toBeInstanceOf(HttpError);
       });
     });
 
@@ -374,7 +429,7 @@ describe('util/http/index', () => {
 
         const { body }: HttpResponse<string> = await http.postJson(
           'http://renovate.com',
-          SomeSchema
+          SomeSchema,
         );
 
         expect(body).toBe('2 + 2 = 4');
@@ -388,7 +443,7 @@ describe('util/http/index', () => {
           .reply(200, JSON.stringify({ foo: 'bar' }));
 
         await expect(
-          http.postJson('http://renovate.com', SomeSchema)
+          http.postJson('http://renovate.com', SomeSchema),
         ).rejects.toThrow(z.ZodError);
       });
     });
@@ -423,80 +478,6 @@ describe('util/http/index', () => {
       const t2 = Date.now();
 
       expect(t2 - t1).toBeGreaterThanOrEqual(4000);
-    });
-  });
-
-  describe('Etag caching', () => {
-    it('returns cached data for status=304', async () => {
-      type FooBar = { foo: string; bar: string };
-      const data: FooBar = { foo: 'foo', bar: 'bar' };
-      httpMock
-        .scope(baseUrl, { reqheaders: { 'If-None-Match': 'foobar' } })
-        .get('/foo')
-        .reply(304);
-
-      const res = await http.getJson<FooBar>(`/foo`, {
-        baseUrl,
-        etagCache: {
-          etag: 'foobar',
-          data,
-        },
-      });
-
-      expect(res.statusCode).toBe(304);
-      expect(res.body).toEqual(data);
-      expect(res.body).not.toBe(data);
-    });
-
-    it('bypasses schema parsing', async () => {
-      const FooBar = z
-        .object({ foo: z.string(), bar: z.string() })
-        .transform(({ foo, bar }) => ({
-          foobar: `${foo}${bar}`.toUpperCase(),
-        }));
-      const data = FooBar.parse({ foo: 'foo', bar: 'bar' });
-      httpMock
-        .scope(baseUrl, { reqheaders: { 'If-None-Match': 'foobar' } })
-        .get('/foo')
-        .reply(304);
-
-      const res = await http.getJson(
-        `/foo`,
-        {
-          baseUrl,
-          etagCache: {
-            etag: 'foobar',
-            data,
-          },
-        },
-        FooBar
-      );
-
-      expect(res.statusCode).toBe(304);
-      expect(res.body).toEqual(data);
-      expect(res.body).not.toBe(data);
-    });
-
-    it('returns new data for status=200', async () => {
-      type FooBar = { foo: string; bar: string };
-      const oldData: FooBar = { foo: 'foo', bar: 'bar' };
-      const newData: FooBar = { foo: 'FOO', bar: 'BAR' };
-      httpMock
-        .scope(baseUrl, { reqheaders: { 'If-None-Match': 'foobar' } })
-        .get('/foo')
-        .reply(200, newData);
-
-      const res = await http.getJson<FooBar>(`/foo`, {
-        baseUrl,
-        etagCache: {
-          etag: 'foobar',
-          data: oldData,
-        },
-      });
-
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toEqual(newData);
-      expect(res.body).not.toBe(newData);
     });
   });
 });

@@ -1,8 +1,11 @@
+import { mockDeep } from 'jest-mock-extended';
 import { DateTime } from 'luxon';
 import { Fixtures } from '../../../../../../test/fixtures';
 import * as httpMock from '../../../../../../test/http-mock';
 import { mocked, partial } from '../../../../../../test/util';
+import { clone } from '../../../../../util/clone';
 import * as githubGraphql from '../../../../../util/github/graphql';
+import type { GithubReleaseItem } from '../../../../../util/github/graphql/types';
 import * as _hostRules from '../../../../../util/host-rules';
 import { toBase64 } from '../../../../../util/string';
 import type { BranchUpgradeConfig } from '../../../../types';
@@ -12,6 +15,7 @@ import {
   getReleaseNotes,
   getReleaseNotesMd,
   releaseNotesCacheMinutes,
+  shouldSkipChangelogMd,
 } from './release-notes';
 import type {
   ChangeLogNotes,
@@ -20,20 +24,62 @@ import type {
   ChangeLogResult,
 } from './types';
 
-jest.mock('../../../../../util/host-rules');
+jest.mock('../../../../../util/host-rules', () => mockDeep());
 
 const hostRules = mocked(_hostRules);
 
-const angularJsChangelogMd = Fixtures.get('angular-js.md', '..');
-const jestChangelogMd = Fixtures.get('jest.md', '..');
-const jsYamlChangelogMd = Fixtures.get('js-yaml.md', '..');
-const yargsChangelogMd = Fixtures.get('yargs.md', '..');
-const adapterutilsChangelogMd = Fixtures.get('adapter-utils.md', '..');
-const gitterWebappChangelogMd = Fixtures.get('gitter-webapp.md', '..');
+const angularJsChangelogMd = Fixtures.get('angular-js.md');
+const jestChangelogMd = Fixtures.get('jest.md');
+const jsYamlChangelogMd = Fixtures.get('js-yaml.md');
+const yargsChangelogMd = Fixtures.get('yargs.md');
+const adapterutilsChangelogMd = Fixtures.get('adapter-utils.md');
+const gitterWebappChangelogMd = Fixtures.get('gitter-webapp.md');
+
+const bitbucketTreeResponse = {
+  values: [
+    {
+      type: 'commit_directory',
+      path: 'lib',
+      commit: {
+        hash: '1234',
+      },
+    },
+    {
+      type: 'commit_file',
+      path: 'CHANGELOG',
+      commit: {
+        hash: 'cdef',
+      },
+    },
+    {
+      type: 'commit_file',
+      path: 'CHANGELOG.json',
+      commit: {
+        hash: 'defg',
+      },
+    },
+    {
+      type: 'commit_file',
+      path: 'CHANGELOG.md',
+      commit: {
+        hash: 'abcd',
+      },
+    },
+    {
+      type: 'commit_file',
+      path: 'RELEASE_NOTES.md',
+      commit: {
+        hash: 'asdf',
+      },
+    },
+  ],
+};
 
 const githubTreeResponse = {
   tree: [
     { path: 'lib', type: 'tree' },
+    { path: 'CHANGELOG', type: 'blob', sha: 'cdef' },
+    { path: 'CHANGELOG.json', type: 'blob', sha: 'bcde' },
     { path: 'CHANGELOG.md', type: 'blob', sha: 'abcd' },
     { path: 'README.md', type: 'blob' },
   ],
@@ -41,9 +87,17 @@ const githubTreeResponse = {
 
 const gitlabTreeResponse = [
   { path: 'lib', name: 'lib', type: 'tree' },
+  { path: 'CHANGELOG', name: 'CHANGELOG', type: 'blob', id: 'cdef' },
+  { path: 'CHANGELOG.json', name: 'CHANGELOG.json', type: 'blob', id: 'bcde' },
   { path: 'CHANGELOG.md', name: 'CHANGELOG.md', type: 'blob', id: 'abcd' },
   { path: 'README.md', name: 'README.md', type: 'blob' },
 ];
+
+const bitbucketProject = partial<ChangeLogProject>({
+  type: 'bitbucket',
+  apiBaseUrl: 'https://api.bitbucket.org/',
+  baseUrl: 'https://bitbucket.org/',
+});
 
 const githubProject = partial<ChangeLogProject>({
   type: 'github',
@@ -73,7 +127,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
       [now.minus({ weeks: 2 }), 1435],
       [now.minus({ years: 1 }), 14495],
     ])('works with string date (%s, %i)', (date, minutes) => {
-      expect(releaseNotesCacheMinutes(date.toISO()!)).toEqual(minutes);
+      expect(releaseNotesCacheMinutes(date.toISO())).toEqual(minutes);
     });
 
     it('handles date object', () => {
@@ -88,23 +142,23 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
   describe('addReleaseNotes()', () => {
     it('returns null if input is null/undefined', async () => {
       expect(
-        await addReleaseNotes(null, partial<BranchUpgradeConfig>())
+        await addReleaseNotes(null, partial<BranchUpgradeConfig>()),
       ).toBeNull();
       expect(
-        await addReleaseNotes(undefined, partial<BranchUpgradeConfig>())
+        await addReleaseNotes(undefined, partial<BranchUpgradeConfig>()),
       ).toBeNull();
     });
 
     it('returns input if invalid', async () => {
       const input = { a: 1 };
       expect(
-        await addReleaseNotes(input as never, partial<BranchUpgradeConfig>())
+        await addReleaseNotes(input as never, partial<BranchUpgradeConfig>()),
       ).toEqual(input);
       expect(
-        await addReleaseNotes(null, partial<BranchUpgradeConfig>())
+        await addReleaseNotes(null, partial<BranchUpgradeConfig>()),
       ).toBeNull();
       expect(
-        await addReleaseNotes({ versions: [] }, partial<BranchUpgradeConfig>())
+        await addReleaseNotes({ versions: [] }, partial<BranchUpgradeConfig>()),
       ).toStrictEqual({ versions: [] });
     });
 
@@ -117,7 +171,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         versions: [{ version: '3.10.0', compare: { url: '' } }],
       };
       expect(
-        await addReleaseNotes(input as never, partial<BranchUpgradeConfig>())
+        await addReleaseNotes(input as never, partial<BranchUpgradeConfig>()),
       ).toEqual({
         hasReleaseNotes: false,
         project: {
@@ -137,10 +191,21 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
     });
 
     it('returns ChangeLogResult without release notes', async () => {
+      httpMock
+        .scope(
+          'https://gitlab.com/api/v4/projects/gitlab-org%2Fgitter%2Fwebapp',
+        )
+        .get('/repository/tree?per_page=100&path=lib')
+        .reply(200, [])
+        .get('/releases?per_page=100')
+        .reply(200, []);
       const input = {
         project: partial<ChangeLogProject>({
           type: 'gitlab',
-          repository: 'https://gitlab.com/gitlab-org/gitter/webapp/',
+          repository: 'gitlab-org/gitter/webapp',
+          sourceDirectory: 'lib',
+          apiBaseUrl: 'https://gitlab.com/api/v4/',
+          baseUrl: 'https://gitlab.com/',
         }),
         versions: [
           partial<ChangeLogRelease>({
@@ -150,12 +215,15 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         ],
       } satisfies ChangeLogResult;
       expect(
-        await addReleaseNotes(input, partial<BranchUpgradeConfig>())
+        await addReleaseNotes(input, partial<BranchUpgradeConfig>()),
       ).toEqual({
         hasReleaseNotes: false,
         project: {
-          repository: 'https://gitlab.com/gitlab-org/gitter/webapp/',
+          repository: 'gitlab-org/gitter/webapp',
           type: 'gitlab',
+          sourceDirectory: 'lib',
+          apiBaseUrl: 'https://gitlab.com/api/v4/',
+          baseUrl: 'https://gitlab.com/',
         },
         versions: [
           {
@@ -174,7 +242,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
     it('should return empty array if no apiBaseUrl', async () => {
       const res = await getReleaseList(
         partial<ChangeLogProject>(),
-        partial<ChangeLogRelease>()
+        partial<ChangeLogRelease>(),
       );
       expect(res).toBeEmptyArray();
     });
@@ -204,7 +272,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           ...githubProject,
           repository: 'some/yet-other-repository',
         },
-        partial<ChangeLogRelease>()
+        partial<ChangeLogRelease>(),
       );
       expect(res).toMatchObject([
         {
@@ -225,7 +293,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
       httpMock
         .scope('https://gitlab.com/')
         .get(
-          '/api/v4/projects/some%2Fyet-other-repository/releases?per_page=100'
+          '/api/v4/projects/some%2Fyet-other-repository/releases?per_page=100',
         )
         .reply(200, [
           { tag_name: `v1.0.0` },
@@ -239,20 +307,20 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           ...gitlabProject,
           repository: 'some/yet-other-repository',
         },
-        partial<ChangeLogRelease>()
+        partial<ChangeLogRelease>(),
       );
       expect(res).toMatchObject([
         {
           notesSourceUrl:
             'https://gitlab.com/api/v4/projects/some%2Fyet-other-repository/releases',
           tag: 'v1.0.0',
-          url: 'https://gitlab.com/api/v4/projects/some%2Fyet-other-repository/releases/v1.0.0',
+          url: 'https://gitlab.com/some/yet-other-repository/-/releases/v1.0.0',
         },
         {
           notesSourceUrl:
             'https://gitlab.com/api/v4/projects/some%2Fyet-other-repository/releases',
           tag: 'v1.0.1',
-          url: 'https://gitlab.com/api/v4/projects/some%2Fyet-other-repository/releases/v1.0.1',
+          url: 'https://gitlab.com/some/yet-other-repository/-/releases/v1.0.1',
         },
       ]);
     });
@@ -262,7 +330,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
       httpMock
         .scope('https://my.custom.domain/')
         .get(
-          '/api/v4/projects/some%2Fyet-other-repository/releases?per_page=100'
+          '/api/v4/projects/some%2Fyet-other-repository/releases?per_page=100',
         )
         .reply(200, [
           { tag_name: `v1.0.0` },
@@ -278,20 +346,20 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           apiBaseUrl: 'https://my.custom.domain/api/v4/',
           baseUrl: 'https://my.custom.domain/',
         },
-        partial<ChangeLogRelease>()
+        partial<ChangeLogRelease>(),
       );
       expect(res).toMatchObject([
         {
           notesSourceUrl:
             'https://my.custom.domain/api/v4/projects/some%2Fyet-other-repository/releases',
           tag: 'v1.0.0',
-          url: 'https://my.custom.domain/api/v4/projects/some%2Fyet-other-repository/releases/v1.0.0',
+          url: 'https://my.custom.domain/some/yet-other-repository/-/releases/v1.0.0',
         },
         {
           notesSourceUrl:
             'https://my.custom.domain/api/v4/projects/some%2Fyet-other-repository/releases',
           tag: 'v1.0.1',
-          url: 'https://my.custom.domain/api/v4/projects/some%2Fyet-other-repository/releases/v1.0.1',
+          url: 'https://my.custom.domain/some/yet-other-repository/-/releases/v1.0.1',
         },
       ]);
     });
@@ -327,7 +395,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.0',
           gitRef: '1.0.0',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toBeNull();
     });
@@ -362,7 +430,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body [#123](https://github.com/some/other-repository/issues/123), [#124](https://github.com/some/yet-other-repository/issues/124)\n',
@@ -404,7 +472,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: '',
@@ -446,7 +514,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body\n',
@@ -488,7 +556,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body\n',
@@ -530,7 +598,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toBeNull();
     });
@@ -565,7 +633,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body [#123](https://github.com/some/other-repository/issues/123), [#124](https://github.com/some/yet-other-repository/issues/124)\n',
@@ -578,7 +646,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
       });
     });
 
-    it('gets release notes with body "other-"', async () => {
+    it('gets release notes with body "other-" (packageName)', async () => {
       githubReleasesMock.mockResolvedValueOnce([
         {
           version: 'other-1.0.0',
@@ -609,7 +677,52 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
+      );
+      expect(res).toEqual({
+        body: 'some body [#123](https://github.com/some/other-repository/issues/123), [#124](https://github.com/some/yet-other-repository/issues/124)\n',
+        id: 2,
+        name: 'some/dep',
+        notesSourceUrl:
+          'https://api.github.com/repos/some/other-repository/releases',
+        tag: 'other-1.0.1',
+        url: 'https://github.com/some/other-repository/releases/other-1.0.1',
+      });
+    });
+
+    it('gets release notes with body "other-" (depName)', async () => {
+      githubReleasesMock.mockResolvedValueOnce([
+        {
+          version: 'other-1.0.0',
+          releaseTimestamp: '2020-01-01',
+          id: 1,
+          url: 'https://github.com/some/other-repository/releases/other-1.0.0',
+          name: 'some/dep',
+          description: 'some body',
+        },
+        {
+          version: 'other-1.0.1',
+          releaseTimestamp: '2020-01-01',
+          id: 2,
+          url: 'https://github.com/some/other-repository/releases/other-1.0.1',
+          name: 'some/dep',
+          description:
+            'some body #123, [#124](https://github.com/some/yet-other-repository/issues/124)',
+        },
+      ]);
+
+      const res = await getReleaseNotes(
+        {
+          ...githubProject,
+          repository: 'some/other-repository',
+          packageName: 'some.registry/some/other',
+          depName: 'other',
+        },
+        partial<ChangeLogRelease>({
+          version: '1.0.1',
+          gitRef: '1.0.1',
+        }),
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body [#123](https://github.com/some/other-repository/issues/123), [#124](https://github.com/some/yet-other-repository/issues/124)\n',
@@ -653,7 +766,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body [#123](https://github.com/some/other-repository/issues/123), [#124](https://github.com/some/yet-other-repository/issues/124)\n',
@@ -675,7 +788,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           url: 'https://github.com/some/other-repository/releases/other@1.0.0',
           name: 'some/dep',
           description: 'some body',
-        } as never,
+        },
         {
           version: 'other@1.0.1',
           description:
@@ -685,7 +798,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           url: 'https://github.com/some/other-repository/releases/other@1.0.1',
           name: 'some/dep',
         },
-      ]);
+      ] satisfies GithubReleaseItem[]);
       const res = await getReleaseNotes(
         {
           ...githubProject,
@@ -696,7 +809,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body [#123](https://github.com/some/other-repository/issues/123), [#124](https://github.com/some/yet-other-repository/issues/124)\n',
@@ -734,7 +847,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body #123, [#124](https://gitlab.com/some/yet-other-repository/issues/124)',
@@ -771,7 +884,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body #123, [#124](https://gitlab.com/some/yet-other-repository/issues/124)',
@@ -808,7 +921,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         body: 'some body #123, [#124](https://gitlab.com/some/yet-other-repository/issues/124)',
@@ -832,7 +945,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.1',
           gitRef: '1.0.1',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toBeNull();
     });
@@ -875,7 +988,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           version: '1.0.0',
           gitRef: '1.0.0',
         }),
-        partial<BranchUpgradeConfig>()
+        partial<BranchUpgradeConfig>(),
       );
       expect(res).toEqual({
         url: 'correct/url/tag.com',
@@ -911,7 +1024,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         }),
         partial<BranchUpgradeConfig>({
           extractVersion: 'app-(?<version>[0-9.]*)',
-        })
+        }),
       );
       expect(res).toEqual({
         url: 'correct/url/tag.com',
@@ -936,7 +1049,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '2.0.0',
           gitRef: '2.0.0',
-        })
+        }),
       );
       expect(res).toBeNull();
     });
@@ -961,7 +1074,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '2.0.0',
           gitRef: '2.0.0',
-        })
+        }),
       );
       expect(res).toBeNull();
     });
@@ -985,7 +1098,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '1.0.0',
           gitRef: '1.0.0',
-        })
+        }),
       );
       expect(res).toBeNull();
     });
@@ -1009,9 +1122,34 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '1.0.0',
           gitRef: '1.0.0',
-        })
+        }),
       );
       expect(res).toBeNull();
+    });
+
+    it('handles bitbucket release notes link', async () => {
+      httpMock
+        .scope('https://api.bitbucket.org')
+        .get('/2.0/repositories/some-org/some-repo/src/HEAD?pagelen=100')
+        .reply(200, bitbucketTreeResponse)
+        .get('/2.0/repositories/some-org/some-repo/src/abcd/CHANGELOG.md')
+        .reply(200, angularJsChangelogMd);
+
+      const res = await getReleaseNotesMd(
+        {
+          ...bitbucketProject,
+          repository: 'some-org/some-repo',
+        },
+        partial<ChangeLogRelease>({
+          version: '1.6.9',
+          gitRef: '1.6.9',
+        }),
+      );
+      expect(res).toMatchObject({
+        notesSourceUrl:
+          'https://bitbucket.org/some-org/some-repo/src/HEAD/CHANGELOG.md',
+        url: 'https://bitbucket.org/some-org/some-repo/src/HEAD/CHANGELOG.md#169-fiery-basilisk-2018-02-02',
+      });
     });
 
     it('parses angular.js', async () => {
@@ -1033,7 +1171,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '1.6.9',
           gitRef: '1.6.9',
-        })
+        }),
       );
       expect(res).toMatchSnapshot({
         notesSourceUrl:
@@ -1047,7 +1185,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
       httpMock
         .scope('https://api.gitlab.com/')
         .get(
-          '/projects/gitlab-org%2Fgitter%2Fwebapp/repository/tree?per_page=100'
+          '/projects/gitlab-org%2Fgitter%2Fwebapp/repository/tree?per_page=100',
         )
         .reply(200, gitlabTreeResponse)
         .get('/projects/gitlab-org%2Fgitter%2Fwebapp/repository/blobs/abcd/raw')
@@ -1061,7 +1199,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '20.26.0',
           gitRef: '20.26.0',
-        })
+        }),
       );
 
       expect(res).toMatchSnapshot({
@@ -1077,7 +1215,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
       httpMock
         .scope('https://my.custom.domain/')
         .get(
-          '/projects/gitlab-org%2Fgitter%2Fwebapp/repository/tree?per_page=100'
+          '/projects/gitlab-org%2Fgitter%2Fwebapp/repository/tree?per_page=100',
         )
         .reply(200, gitlabTreeResponse)
         .get('/projects/gitlab-org%2Fgitter%2Fwebapp/repository/blobs/abcd/raw')
@@ -1092,7 +1230,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '20.26.0',
           gitRef: '20.26.0',
-        })
+        }),
       );
 
       expect(res).toMatchSnapshot({
@@ -1121,7 +1259,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '22.0.0',
           gitRef: '22.0.0',
-        })
+        }),
       );
 
       expect(res).toMatchSnapshot({
@@ -1133,7 +1271,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
 
     it('handles github sourceDirectory', async () => {
       const sourceDirectory = 'packages/foo';
-      const subdirTree = structuredClone(githubTreeResponse);
+      const subdirTree = clone(githubTreeResponse);
       for (const file of subdirTree.tree) {
         file.path = `${sourceDirectory}/${file.path}`;
       }
@@ -1156,7 +1294,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '3.10.0',
           gitRef: '3.10.0',
-        })
+        }),
       );
 
       expect(res).toMatchSnapshot({
@@ -1185,7 +1323,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '3.10.0',
           gitRef: '3.10.0',
-        })
+        }),
       );
 
       expect(res).toMatchSnapshot({
@@ -1203,7 +1341,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         partial<ChangeLogRelease>({
           version: '3.10.0',
           gitRef: '3.10.0',
-        })
+        }),
       );
       expect(res).toBeNull();
     });
@@ -1231,14 +1369,14 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           partial<ChangeLogRelease>({
             version: '15.3.0',
             gitRef: '15.3.0',
-          })
+          }),
         );
         versionOneNotes = res!;
 
         expect(res).toMatchSnapshot({
           notesSourceUrl:
             'https://github.com/yargs/yargs/blob/HEAD/CHANGELOG.md',
-          url: 'https://github.com/yargs/yargs/blob/HEAD/CHANGELOG.md#1530-httpswwwgithubcomyargsyargscomparev1520v1530-2020-03-08',
+          url: 'https://github.com/yargs/yargs/blob/HEAD/CHANGELOG.md#1530-2020-03-08',
         });
       });
 
@@ -1261,14 +1399,14 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           partial<ChangeLogRelease>({
             version: '15.2.0',
             gitRef: '15.2.0',
-          })
+          }),
         );
         versionTwoNotes = res!;
 
         expect(res).toMatchSnapshot({
           notesSourceUrl:
             'https://github.com/yargs/yargs/blob/HEAD/CHANGELOG.md',
-          url: 'https://github.com/yargs/yargs/blob/HEAD/CHANGELOG.md#1520-httpswwwgithubcomyargsyargscomparev1510v1520-2020-03-01',
+          url: 'https://github.com/yargs/yargs/blob/HEAD/CHANGELOG.md#1520-2020-03-01',
         });
       });
 
@@ -1276,11 +1414,11 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         httpMock
           .scope('https://gitlab.com/')
           .get(
-            '/api/v4/projects/itentialopensource%2Fadapter-utils/repository/tree?per_page=100'
+            '/api/v4/projects/itentialopensource%2Fadapter-utils/repository/tree?per_page=100',
           )
           .reply(200, gitlabTreeResponse)
           .get(
-            '/api/v4/projects/itentialopensource%2Fadapter-utils/repository/blobs/abcd/raw'
+            '/api/v4/projects/itentialopensource%2Fadapter-utils/repository/blobs/abcd/raw',
           )
           .reply(200, adapterutilsChangelogMd);
         const res = await getReleaseNotesMd(
@@ -1291,7 +1429,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           partial<ChangeLogRelease>({
             version: '4.33.0',
             gitRef: '4.33.0',
-          })
+          }),
         );
         versionTwoNotes = res!;
 
@@ -1304,18 +1442,18 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
 
       it('handles gitlab sourceDirectory', async () => {
         const sourceDirectory = 'packages/foo';
-        const response = structuredClone(gitlabTreeResponse).map((file) => ({
+        const response = clone(gitlabTreeResponse).map((file) => ({
           ...file,
           path: `${sourceDirectory}/${file.path}`,
         }));
         httpMock
           .scope('https://gitlab.com/')
           .get(
-            `/api/v4/projects/itentialopensource%2Fadapter-utils/repository/tree?per_page=100&path=${sourceDirectory}`
+            `/api/v4/projects/itentialopensource%2Fadapter-utils/repository/tree?per_page=100&path=${sourceDirectory}`,
           )
           .reply(200, response)
           .get(
-            '/api/v4/projects/itentialopensource%2Fadapter-utils/repository/blobs/abcd/raw'
+            '/api/v4/projects/itentialopensource%2Fadapter-utils/repository/blobs/abcd/raw',
           )
           .reply(200, adapterutilsChangelogMd);
         const res = await getReleaseNotesMd(
@@ -1327,7 +1465,7 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
           partial<ChangeLogRelease>({
             version: '4.33.0',
             gitRef: '4.33.0',
-          })
+          }),
         );
         versionTwoNotes = res!;
 
@@ -1338,12 +1476,36 @@ describe('workers/repository/update/pr/changelog/release-notes', () => {
         });
       });
 
+      it('handles skipped packages', async () => {
+        const res = await getReleaseNotesMd(
+          {
+            ...githubProject,
+            repository: 'facebook/react-native',
+          },
+          partial<ChangeLogRelease>({
+            version: '0.72.3',
+            gitRef: '0.72.3',
+          }),
+        );
+        expect(res).toBeNull();
+      });
+
       it('isUrl', () => {
         expect(versionOneNotes).not.toMatchObject(versionTwoNotes);
       });
 
       it('15.3.0 is not equal to 15.2.0', () => {
         expect(versionOneNotes).not.toMatchObject(versionTwoNotes);
+      });
+    });
+
+    describe('shouldSkipChangelogMd', () => {
+      it('should skip for flagged repository', () => {
+        expect(shouldSkipChangelogMd('facebook/react-native')).toBeTrue();
+      });
+
+      it('should continue for other repository', () => {
+        expect(shouldSkipChangelogMd('some/repo')).toBeFalse();
       });
     });
   });

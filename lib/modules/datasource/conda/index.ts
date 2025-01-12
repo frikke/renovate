@@ -23,11 +23,14 @@ export class CondaDatasource extends Datasource {
 
   override readonly caching = true;
 
+  override readonly sourceUrlSupport = 'package';
+  override readonly sourceUrlNote =
+    'The source URL is determined from the `dev_url` field in the results.';
+
   @cache({
     namespace: `datasource-${datasource}`,
     key: ({ registryUrl, packageName }: GetReleasesConfig) =>
-      // TODO: types (#7154)
-      // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+      // TODO: types (#22198)
       `${registryUrl}:${packageName}`,
   })
   async getReleases({

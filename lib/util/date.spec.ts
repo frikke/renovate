@@ -7,7 +7,7 @@ import {
 } from './date';
 
 describe('util/date', () => {
-  const t0 = DateTime.fromISO('2020-10-10');
+  const t0 = DateTime.fromISO('2020-10-10', { zone: 'utc' });
 
   beforeAll(() => {
     jest.useFakeTimers();
@@ -20,6 +20,11 @@ describe('util/date', () => {
   describe('getElapsedDays', () => {
     it('returns elapsed days', () => {
       const t = t0.minus({ days: 42 });
+      expect(getElapsedDays(t.toISO()!)).toBe(42);
+    });
+
+    it('rounds down', () => {
+      const t = t0.minus({ days: 42, hours: 12 });
       expect(getElapsedDays(t.toISO()!)).toBe(42);
     });
   });

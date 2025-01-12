@@ -6,7 +6,6 @@ export interface DetermineLockFileDirsResult {
   yarnLockDirs: string[];
   npmLockDirs: string[];
   pnpmShrinkwrapDirs: string[];
-  lernaJsonFiles: string[];
 }
 
 export interface AdditionalPackageFiles {
@@ -30,11 +29,25 @@ export interface GenerateLockFileResult {
   stdout?: string;
 }
 
+// the dependencies schema is different for v6 and other lockfile versions
+// Ref: https://github.com/pnpm/spec/issues/4#issuecomment-1524059392
+export type PnpmDependencySchema = Record<string, { version: string } | string>;
+
 export interface PnpmLockFile {
   lockfileVersion: number | string;
-  packages?: Record<string, unknown>;
+  importers?: Record<string, Record<string, PnpmDependencySchema>>;
+  dependencies: PnpmDependencySchema;
+  devDependencies: PnpmDependencySchema;
+  optionalDependencies: PnpmDependencySchema;
+}
+
+export interface YarnRcNpmRegistry {
+  npmAlwaysAuth?: boolean;
+  npmAuthIdent?: string;
+  npmAuthToken?: string;
 }
 
 export interface YarnRcYmlFile {
   yarnPath?: string | null;
+  npmRegistries: Record<string, YarnRcNpmRegistry>;
 }

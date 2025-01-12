@@ -1,12 +1,19 @@
-import { git, mocked, scm } from '../../../../../test/util';
+import { git, mocked, partial, scm } from '../../../../../test/util';
 import * as _cache from '../../../../util/cache/repository';
-import type { RepoCacheData } from '../../../../util/cache/repository/types';
+import type {
+  OnboardingBranchCache,
+  RepoCacheData,
+} from '../../../../util/cache/repository/types';
+import type { LongCommitSha } from '../../../../util/git/types';
 import {
   deleteOnboardingCache,
+  getOnboardingConfigFromCache,
+  getOnboardingFileNameFromCache,
   hasOnboardingBranchChanged,
   isOnboardingBranchConflicted,
   isOnboardingBranchModified,
   setOnboardingCache,
+  setOnboardingConfigDetails,
 } from './onboarding-branch-cache';
 
 jest.mock('../../../../util/cache/repository');
@@ -77,7 +84,9 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
   describe('hasOnboardingBranchChanged()', () => {
     it('return true if cache is absent', () => {
       cache.getCache.mockReturnValueOnce({});
-      git.getBranchCommit.mockReturnValueOnce('onboarding-sha');
+      git.getBranchCommit.mockReturnValueOnce(
+        'onboarding-sha' as LongCommitSha,
+      );
       expect(hasOnboardingBranchChanged('configure/renovate')).toBeTrue();
     });
 
@@ -91,7 +100,9 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
         },
       } satisfies RepoCacheData;
       cache.getCache.mockReturnValueOnce(dummyCache);
-      git.getBranchCommit.mockReturnValueOnce('new-onboarding-sha');
+      git.getBranchCommit.mockReturnValueOnce(
+        'new-onboarding-sha' as LongCommitSha,
+      );
       expect(hasOnboardingBranchChanged('configure/renovate')).toBeTrue();
     });
 
@@ -105,7 +116,9 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
         },
       } satisfies RepoCacheData;
       cache.getCache.mockReturnValueOnce(dummyCache);
-      git.getBranchCommit.mockReturnValueOnce('onboarding-sha');
+      git.getBranchCommit.mockReturnValueOnce(
+        'onboarding-sha' as LongCommitSha,
+      );
       expect(hasOnboardingBranchChanged('configure/renovate')).toBeFalse();
     });
 
@@ -119,7 +132,9 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
         },
       } satisfies RepoCacheData;
       cache.getCache.mockReturnValueOnce(dummyCache);
-      git.getBranchCommit.mockReturnValueOnce('onboarding-sha');
+      git.getBranchCommit.mockReturnValueOnce(
+        'onboarding-sha' as LongCommitSha,
+      );
       expect(hasOnboardingBranchChanged('configure/renovate')).toBeFalse();
     });
   });
@@ -127,10 +142,12 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
   describe('isOnboardingBranchModified()', () => {
     it('falls back to git if cache is absent', async () => {
       cache.getCache.mockReturnValueOnce({});
-      git.getBranchCommit.mockReturnValueOnce('onboarding-sha');
+      git.getBranchCommit.mockReturnValueOnce(
+        'onboarding-sha' as LongCommitSha,
+      );
       scm.isBranchModified.mockResolvedValueOnce(false);
       expect(
-        await isOnboardingBranchModified('configure/renovate')
+        await isOnboardingBranchModified('configure/renovate', 'main'),
       ).toBeFalse();
     });
 
@@ -144,9 +161,13 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
         },
       } satisfies RepoCacheData;
       cache.getCache.mockReturnValueOnce(dummyCache);
-      git.getBranchCommit.mockReturnValueOnce('new-onboarding-sha');
+      git.getBranchCommit.mockReturnValueOnce(
+        'new-onboarding-sha' as LongCommitSha,
+      );
       scm.isBranchModified.mockResolvedValueOnce(true);
-      expect(await isOnboardingBranchModified('configure/renovate')).toBeTrue();
+      expect(
+        await isOnboardingBranchModified('configure/renovate', 'main'),
+      ).toBeTrue();
     });
 
     it('returns cached value', async () => {
@@ -159,8 +180,12 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
         },
       } satisfies RepoCacheData;
       cache.getCache.mockReturnValueOnce(dummyCache);
-      git.getBranchCommit.mockReturnValueOnce('onboarding-sha');
-      expect(await isOnboardingBranchModified('configure/renovate')).toBeTrue();
+      git.getBranchCommit.mockReturnValueOnce(
+        'onboarding-sha' as LongCommitSha,
+      );
+      expect(
+        await isOnboardingBranchModified('configure/renovate', 'main'),
+      ).toBeTrue();
     });
   });
 
@@ -168,11 +193,11 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
     it('falls back to git if cache is absent', async () => {
       cache.getCache.mockReturnValueOnce({});
       git.getBranchCommit
-        .mockReturnValueOnce('onboarding-sha')
-        .mockReturnValueOnce('default-sha');
+        .mockReturnValueOnce('onboarding-sha' as LongCommitSha)
+        .mockReturnValueOnce('default-sha' as LongCommitSha);
       scm.isBranchConflicted.mockResolvedValueOnce(false);
       expect(
-        await isOnboardingBranchConflicted('master', 'configure/renovate')
+        await isOnboardingBranchConflicted('master', 'configure/renovate'),
       ).toBeFalse();
     });
 
@@ -187,11 +212,11 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
       } satisfies RepoCacheData;
       cache.getCache.mockReturnValueOnce(dummyCache);
       git.getBranchCommit
-        .mockReturnValueOnce('onboarding-sha')
-        .mockReturnValueOnce('new-default-sha');
+        .mockReturnValueOnce('onboarding-sha' as LongCommitSha)
+        .mockReturnValueOnce('new-default-sha' as LongCommitSha);
       scm.isBranchConflicted.mockResolvedValueOnce(false);
       expect(
-        await isOnboardingBranchConflicted('master', 'configure/renovate')
+        await isOnboardingBranchConflicted('master', 'configure/renovate'),
       ).toBeFalse();
     });
 
@@ -206,11 +231,11 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
       } satisfies RepoCacheData;
       cache.getCache.mockReturnValueOnce(dummyCache);
       git.getBranchCommit
-        .mockReturnValueOnce('new-onboarding-sha')
-        .mockReturnValueOnce('default-sha');
+        .mockReturnValueOnce('new-onboarding-sha' as LongCommitSha)
+        .mockReturnValueOnce('default-sha' as LongCommitSha);
       scm.isBranchConflicted.mockResolvedValueOnce(false);
       expect(
-        await isOnboardingBranchConflicted('master', 'configure/renovate')
+        await isOnboardingBranchConflicted('master', 'configure/renovate'),
       ).toBeFalse();
     });
 
@@ -225,11 +250,70 @@ describe('workers/repository/onboarding/branch/onboarding-branch-cache', () => {
       } satisfies RepoCacheData;
       cache.getCache.mockReturnValueOnce(dummyCache);
       git.getBranchCommit
-        .mockReturnValueOnce('onboarding-sha')
-        .mockReturnValueOnce('default-sha');
+        .mockReturnValueOnce('onboarding-sha' as LongCommitSha)
+        .mockReturnValueOnce('default-sha' as LongCommitSha);
       expect(
-        await isOnboardingBranchConflicted('master', 'configure/renovate')
+        await isOnboardingBranchConflicted('master', 'configure/renovate'),
       ).toBeTrue();
+    });
+  });
+
+  describe('getOnboardingFileNameFromCache()', () => {
+    it('returns cached value', () => {
+      const dummyCache = {
+        onboardingBranchCache: partial<OnboardingBranchCache>({
+          configFileName: 'renovate.json',
+        }),
+      } satisfies RepoCacheData;
+      cache.getCache.mockReturnValueOnce(dummyCache);
+      expect(getOnboardingFileNameFromCache()).toBe('renovate.json');
+    });
+
+    it('returns undefined', () => {
+      cache.getCache.mockReturnValueOnce({});
+      expect(getOnboardingFileNameFromCache()).toBeUndefined();
+    });
+  });
+
+  describe('getOnboardingConfigFromCache()', () => {
+    it('returns cached value', () => {
+      const dummyCache = {
+        onboardingBranchCache: partial<OnboardingBranchCache>({
+          configFileParsed: 'parsed',
+        }),
+      } satisfies RepoCacheData;
+      cache.getCache.mockReturnValueOnce(dummyCache);
+      expect(getOnboardingConfigFromCache()).toBe('parsed');
+    });
+
+    it('returns undefined', () => {
+      cache.getCache.mockReturnValueOnce({});
+      expect(getOnboardingConfigFromCache()).toBeUndefined();
+    });
+  });
+
+  describe('setOnboardingConfigDetails()', () => {
+    it('returns cached value', () => {
+      const dummyCache = {
+        onboardingBranchCache: {
+          defaultBranchSha: 'default-sha',
+          onboardingBranchSha: 'onboarding-sha',
+          isConflicted: true,
+          isModified: true,
+        },
+      } satisfies RepoCacheData;
+      cache.getCache.mockReturnValueOnce(dummyCache);
+      setOnboardingConfigDetails('renovate.json', 'parsed');
+      expect(dummyCache).toEqual({
+        onboardingBranchCache: {
+          defaultBranchSha: 'default-sha',
+          onboardingBranchSha: 'onboarding-sha',
+          isConflicted: true,
+          isModified: true,
+          configFileName: 'renovate.json',
+          configFileParsed: 'parsed',
+        },
+      });
     });
   });
 });

@@ -1,3 +1,4 @@
+import { mockDeep } from 'jest-mock-extended';
 import { join } from 'upath';
 import { envMock, mockExecAll } from '../../../../test/exec-util';
 import { env, fs, git, mocked, partial } from '../../../../test/util';
@@ -12,8 +13,7 @@ import { updateArtifacts } from '.';
 jest.mock('../../../util/exec/env');
 jest.mock('../../../util/git');
 jest.mock('../../../util/fs');
-jest.mock('../../platform');
-jest.mock('../../datasource');
+jest.mock('../../datasource', () => mockDeep());
 
 const datasource = mocked(_datasource);
 
@@ -26,11 +26,11 @@ const adminConfig: RepoGlobalConfig = {
   localDir: join('/tmp/github/some/repo'),
   cacheDir: join('/tmp/cache'),
   containerbaseDir: join('/tmp/cache/containerbase'),
+  dockerSidecarImage: 'ghcr.io/containerbase/sidecar',
 };
 
 describe('modules/manager/cocoapods/artifacts', () => {
   beforeEach(() => {
-    jest.resetAllMocks();
     env.getChildProcessEnv.mockReturnValue(envMock.basic);
     jest.spyOn(docker, 'removeDockerContainer').mockResolvedValue();
     // can't be mocked
@@ -60,7 +60,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [{ depName: 'foo' }],
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toBeNull();
     expect(execSnapshots).toMatchSnapshot();
   });
@@ -73,7 +73,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [],
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toBeNull();
     expect(execSnapshots).toMatchSnapshot();
   });
@@ -90,7 +90,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [{ depName: 'foo' }],
         newPackageFileContent: '',
         config: {},
-      })
+      }),
     ).toBeNull();
     expect(execSnapshots).toMatchSnapshot();
   });
@@ -103,7 +103,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [],
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toBeNull();
     expect(execSnapshots).toMatchSnapshot();
   });
@@ -115,7 +115,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
     git.getRepoStatus.mockResolvedValueOnce(
       partial<StatusResult>({
         modified: [],
-      })
+      }),
     );
     fs.findLocalSiblingOrParent.mockResolvedValueOnce('Podfile.lock');
     fs.readLocalFile.mockResolvedValueOnce('Current Podfile');
@@ -125,7 +125,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [{ depName: 'foo' }],
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toBeNull();
     expect(execSnapshots).toMatchSnapshot();
   });
@@ -139,7 +139,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
     git.getRepoStatus.mockResolvedValueOnce(
       partial<StatusResult>({
         modified: ['Podfile.lock'],
-      })
+      }),
     );
     fs.findLocalSiblingOrParent.mockResolvedValueOnce('Podfile');
     fs.readLocalFile.mockResolvedValueOnce('New Podfile');
@@ -149,7 +149,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [{ depName: 'foo' }],
         newPackageFileContent: 'plugin "cocoapods-acknowledgements"',
         config,
-      })
+      }),
     ).toMatchObject([{ file: { contents: 'New Podfile' } }]);
     expect(execSnapshots).toMatchSnapshot();
   });
@@ -169,7 +169,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         not_added: ['Pods/New'],
         modified: ['Podfile.lock', 'Pods/Manifest.lock'],
         deleted: ['Pods/Deleted'],
-      })
+      }),
     );
     expect(
       await updateArtifacts({
@@ -177,7 +177,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [{ depName: 'foo' }],
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toMatchObject([
       { file: { type: 'addition', path: 'Podfile.lock' } },
       { file: { type: 'addition', path: 'Pods/Manifest.lock' } },
@@ -201,7 +201,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [{ depName: 'foo' }],
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toEqual([
       { artifactError: { lockFile: 'Podfile.lock', stderr: 'not found' } },
     ]);
@@ -222,7 +222,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
         updatedDeps: [{ depName: 'foo' }],
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toEqual([
       { artifactError: { lockFile: 'Podfile.lock', stderr: 'exec exception' } },
     ]);
@@ -242,7 +242,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
     git.getRepoStatus.mockResolvedValueOnce(
       partial<StatusResult>({
         modified: ['Podfile.lock'],
-      })
+      }),
     );
 
     await updateArtifacts({
@@ -252,16 +252,15 @@ describe('modules/manager/cocoapods/artifacts', () => {
       config,
     });
     expect(execSnapshots).toMatchObject([
-      { cmd: 'docker pull containerbase/sidecar' },
+      { cmd: 'docker pull ghcr.io/containerbase/sidecar' },
       {
         cmd:
           'docker run --rm --name=renovate_sidecar --label=renovate_child ' +
           '-v "/tmp/github/some/repo":"/tmp/github/some/repo" ' +
           '-v "/tmp/cache":"/tmp/cache" ' +
-          '-e BUILDPACK_CACHE_DIR ' +
           '-e CONTAINERBASE_CACHE_DIR ' +
           '-w "/tmp/github/some/repo" ' +
-          'containerbase/sidecar' +
+          'ghcr.io/containerbase/sidecar' +
           ' bash -l -c "' +
           'install-tool ruby 3.1.0' +
           ' && ' +
@@ -286,7 +285,7 @@ describe('modules/manager/cocoapods/artifacts', () => {
     git.getRepoStatus.mockResolvedValueOnce(
       partial<StatusResult>({
         modified: ['Podfile.lock'],
-      })
+      }),
     );
 
     await updateArtifacts({

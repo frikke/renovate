@@ -5,7 +5,7 @@ import { detectPlatform } from '../../util/common';
 import { parseGitUrl } from '../../util/git/url';
 import * as hostRules from '../../util/host-rules';
 import { regEx } from '../../util/regex';
-import { parseUrl, trimTrailingSlash, validateUrl } from '../../util/url';
+import { isHttpUrl, parseUrl, trimTrailingSlash } from '../../util/url';
 import { manualChangelogUrls, manualSourceUrls } from './metadata-manual';
 import type { ReleaseResult } from './types';
 
@@ -64,6 +64,9 @@ function massageGitAtUrl(url: string): string {
   return massagedUrl;
 }
 
+/**
+ * @deprecated Use `asTimestamp` instead
+ */
 export function normalizeDate(input: any): string | null {
   if (
     typeof input === 'number' &&
@@ -87,7 +90,14 @@ export function normalizeDate(input: any): string | null {
     //   2. Format of `input` is very exotic
     //      (from `DateTime.fromISO()` perspective)
     //
-    const luxonDate = DateTime.fromISO(input, { zone: 'UTC' });
+
+    let luxonDate = DateTime.fromISO(input, { zone: 'UTC' });
+    if (luxonDate.isValid) {
+      return luxonDate.toISO();
+    }
+    luxonDate = DateTime.fromFormat(input, 'yyyyMMddHHmmss', {
+      zone: 'UTC',
+    });
     if (luxonDate.isValid) {
       return luxonDate.toISO();
     }
@@ -116,7 +126,7 @@ function massageTimestamps(dep: ReleaseResult): void {
 export function addMetaData(
   dep: ReleaseResult,
   datasource: string,
-  packageName: string
+  packageName: string,
 ): void {
   massageTimestamps(dep);
 
@@ -139,7 +149,7 @@ export function addMetaData(
         dep.sourceUrl = parsed.toString();
         dep.sourceDirectory = parsed.filepath;
       }
-    } catch (err) {
+    } catch {
       // ignore invalid urls
     }
   }
@@ -188,7 +198,7 @@ export function addMetaData(
   ];
   for (const urlKey of urlKeys) {
     const urlVal = dep[urlKey];
-    if (is.string(urlVal) && validateUrl(urlVal.trim())) {
+    if (is.string(urlVal) && isHttpUrl(urlVal.trim())) {
       dep[urlKey] = urlVal.trim() as never;
     } else {
       delete dep[urlKey];
@@ -205,7 +215,7 @@ export function addMetaData(
  */
 export function shouldDeleteHomepage(
   sourceUrl: string | null | undefined,
-  homepage: string | undefined
+  homepage: string | undefined,
 ): boolean {
   if (is.nullOrUndefined(sourceUrl) || is.undefined(homepage)) {
     return false;

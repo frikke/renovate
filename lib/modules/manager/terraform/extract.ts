@@ -1,6 +1,11 @@
 import is from '@sindresorhus/is';
 import { logger } from '../../../logger';
-import type { ExtractConfig, PackageFileContent } from '../types';
+import type {
+  ExtractConfig,
+  PackageDependency,
+  PackageFileContent,
+} from '../types';
+import type { DependencyExtractor } from './base';
 import { resourceExtractors } from './extractors';
 import * as hcl from './hcl';
 import {
@@ -11,11 +16,11 @@ import {
 export async function extractPackageFile(
   content: string,
   packageFile: string,
-  config: ExtractConfig
+  config: ExtractConfig,
 ): Promise<PackageFileContent | null> {
   logger.trace({ content }, `terraform.extractPackageFile(${packageFile})`);
 
-  const passedExtractors = [];
+  const passedExtractors: DependencyExtractor[] = [];
   for (const extractor of resourceExtractors) {
     if (checkFileContainsDependency(content, extractor.getCheckList())) {
       passedExtractors.push(extractor);
@@ -25,7 +30,7 @@ export async function extractPackageFile(
   if (!passedExtractors.length) {
     logger.debug(
       { packageFile },
-      'preflight content check has not found any relevant content'
+      'preflight content check has not found any relevant content',
     );
     return null;
   }
@@ -33,10 +38,10 @@ export async function extractPackageFile(
     { packageFile },
     `preflight content check passed for extractors: [${passedExtractors
       .map((value) => value.constructor.name)
-      .toString()}]`
+      .toString()}]`,
   );
 
-  const dependencies = [];
+  const dependencies: PackageDependency[] = [];
   const hclMap = await hcl.parseHCL(content, packageFile);
   if (is.nullOrUndefined(hclMap)) {
     logger.debug({ packageFile }, 'failed to parse HCL file');
@@ -51,5 +56,5 @@ export async function extractPackageFile(
   }
 
   dependencies.forEach((value) => delete value.managerData);
-  return { deps: dependencies };
+  return dependencies.length ? { deps: dependencies } : null;
 }

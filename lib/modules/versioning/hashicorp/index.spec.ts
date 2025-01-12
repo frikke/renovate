@@ -2,25 +2,28 @@ import { api as semver } from '.';
 
 describe('modules/versioning/hashicorp/index', () => {
   it.each`
-    version    | range         | expected
-    ${'4.2.0'} | ${'~> 4.0'}   | ${true}
-    ${'4.2.0'} | ${'~> 4.0.0'} | ${false}
+    version    | range                 | expected
+    ${'4.2.0'} | ${'~> 4.0'}           | ${true}
+    ${'4.2.0'} | ${'~> 4.0.0'}         | ${false}
+    ${'4.2.0'} | ${'~> 4.0, != 4.2.0'} | ${false}
+    ${'4.2.6'} | ${'~> 4.0, != 4.2.0'} | ${true}
   `(
     'matches("$version", "$range") === $expected',
     ({ version, range, expected }) => {
       expect(semver.matches(version, range)).toBe(expected);
-    }
+    },
   );
 
   it.each`
-    versions                                         | range         | expected
-    ${['0.4.0', '0.5.0', '4.0.0', '4.2.0', '5.0.0']} | ${'~> 4.0'}   | ${'4.2.0'}
-    ${['0.4.0', '0.5.0', '4.0.0', '4.2.0', '5.0.0']} | ${'~> 4.0.0'} | ${'4.0.0'}
+    versions                                         | range                 | expected
+    ${['0.4.0', '0.5.0', '4.0.0', '4.2.0', '5.0.0']} | ${'~> 4.0'}           | ${'4.2.0'}
+    ${['0.4.0', '0.5.0', '4.0.0', '4.2.0', '5.0.0']} | ${'~> 4.0.0'}         | ${'4.0.0'}
+    ${['0.4.0', '0.5.0', '4.0.0', '4.2.0', '5.0.0']} | ${'!=4.2.0, > 4.0.0'} | ${'5.0.0'}
   `(
     'getSatisfyingVersion($versions, "$range") === $expected',
     ({ versions, range, expected }) => {
       expect(semver.getSatisfyingVersion(versions, range)).toBe(expected);
-    }
+    },
   );
 
   it.each`
@@ -50,18 +53,20 @@ describe('modules/versioning/hashicorp/index', () => {
     'isLessThanRange($version, $range) === $expected',
     ({ version, range, expected }) => {
       expect(semver.isLessThanRange?.(version, range)).toBe(expected);
-    }
+    },
   );
 
   it.each`
-    versions                                | range         | expected
-    ${['0.4.0', '0.5.0', '4.2.0', '5.0.0']} | ${'~> 4.0'}   | ${'4.2.0'}
-    ${['0.4.0', '0.5.0', '4.2.0', '5.0.0']} | ${'~> 4.0.0'} | ${null}
+    versions                                | range                 | expected
+    ${['0.4.0', '0.5.0', '4.2.0', '5.0.0']} | ${'~> 4.0'}           | ${'4.2.0'}
+    ${['0.4.0', '0.5.0', '4.2.0', '5.0.0']} | ${'~> 4.0.0'}         | ${null}
+    ${['0.4.0', '0.5.0', '4.2.0', '5.0.0']} | ${'~> 4.0, != 4.2.0'} | ${null}
+    ${['0.4.0', '0.5.0', '4.2.0', '4.1.0']} | ${'~> 4.0, != 4.2.0'} | ${'4.1.0'}
   `(
     'minSatisfyingVersion($versions, "$range") === $expected',
     ({ versions, range, expected }) => {
       expect(semver.minSatisfyingVersion(versions, range)).toBe(expected);
-    }
+    },
   );
 
   it.each`
@@ -99,6 +104,6 @@ describe('modules/versioning/hashicorp/index', () => {
         newVersion,
       });
       expect(res).toEqual(expected);
-    }
+    },
   );
 });
