@@ -1,4 +1,5 @@
 import { codeBlock } from 'common-tags';
+import { mockDeep } from 'jest-mock-extended';
 import { join } from 'upath';
 import { envMock, mockExecAll } from '../../../../test/exec-util';
 import { env, fs, git, mocked } from '../../../../test/util';
@@ -10,7 +11,7 @@ import * as _datasource from '../../datasource';
 import type { UpdateArtifactsConfig } from '../types';
 import * as helmfile from '.';
 
-jest.mock('../../datasource');
+jest.mock('../../datasource', () => mockDeep());
 jest.mock('../../../util/exec/env');
 jest.mock('../../../util/http');
 jest.mock('../../../util/fs');
@@ -24,6 +25,7 @@ const adminConfig: RepoGlobalConfig = {
   localDir: join('/tmp/github/some/repo'), // `join` fixes Windows CI
   cacheDir: join('/tmp/renovate/cache'),
   containerbaseDir: join('/tmp/renovate/cache/containerbase'),
+  dockerSidecarImage: 'ghcr.io/containerbase/sidecar',
 };
 
 const config: UpdateArtifactsConfig = {};
@@ -38,6 +40,9 @@ releases:
   - name: backstage
     chart: backstage/backstage
     version: 0.12.0
+{{- if eq .Environment.Name "test" }}
+    installed: false
+{{- end }}
   - name: oauth-proxy
     chart: oauth2-proxy/oauth2-proxy
     version: 6.8.0
@@ -84,7 +89,7 @@ describe('modules/manager/helmfile/artifacts', () => {
         updatedDeps,
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toBeNull();
   });
 
@@ -95,7 +100,7 @@ describe('modules/manager/helmfile/artifacts', () => {
         updatedDeps: [],
         newPackageFileContent: '',
         config,
-      })
+      }),
     ).toBeNull();
   });
 
@@ -105,7 +110,7 @@ describe('modules/manager/helmfile/artifacts', () => {
     const execSnapshots = mockExecAll();
     fs.readLocalFile.mockResolvedValueOnce(lockFile as never);
     fs.privateCacheDir.mockReturnValue(
-      '/tmp/renovate/cache/__renovate-private-cache'
+      '/tmp/renovate/cache/__renovate-private-cache',
     );
     fs.getParentDir.mockReturnValue('');
     expect(
@@ -114,7 +119,7 @@ describe('modules/manager/helmfile/artifacts', () => {
         updatedDeps: [{ depName: 'dep1' }],
         newPackageFileContent: helmfileYaml,
         config,
-      })
+      }),
     ).toBeNull();
     expect(execSnapshots).toMatchObject([
       { cmd: 'helmfile deps -f helmfile.yaml' },
@@ -127,7 +132,7 @@ describe('modules/manager/helmfile/artifacts', () => {
     const execSnapshots = mockExecAll();
     fs.readLocalFile.mockResolvedValueOnce(lockFileTwo as never);
     fs.privateCacheDir.mockReturnValue(
-      '/tmp/renovate/cache/__renovate-private-cache'
+      '/tmp/renovate/cache/__renovate-private-cache',
     );
     fs.getParentDir.mockReturnValue('');
     const updatedDeps = [{ depName: 'dep1' }, { depName: 'dep2' }];
@@ -137,7 +142,7 @@ describe('modules/manager/helmfile/artifacts', () => {
         updatedDeps,
         newPackageFileContent: helmfileYaml,
         config,
-      })
+      }),
     ).toEqual([
       {
         file: {
@@ -152,25 +157,179 @@ describe('modules/manager/helmfile/artifacts', () => {
     ]);
   });
 
+  it('returns updated helmfile.lock if repositories were defined in ../helmfile-defaults.yaml.', async () => {
+    const helmfileYamlWithoutRepositories = codeBlock`
+    bases:
+      - ../helmfile-defaults.yaml
+    releases:
+      - name: backstage
+        chart: backstage/backstage
+        version: 0.12.0
+    `;
+    const lockFileWithoutRepositories = codeBlock`
+    version: 0.151.0
+    dependencies:
+    - name: backstage
+      repository: https://backstage.github.io/charts
+      version: 0.11.0
+    digest: sha256:e284706b71f37b757a536703da4cb148d67901afbf1ab431f7d60a9852ca6eef
+    generated: "2023-03-08T21:32:06.122276997+01:00"
+    `;
+    const lockFileTwoWithoutRepositories = codeBlock`
+    version: 0.151.0
+    dependencies:
+    - name: backstage
+      repository: https://backstage.github.io/charts
+      version: 0.12.0
+    digest: sha256:9d83889176d005effb86041d30c20361625561cbfb439cbd16d7243225bac17c
+    generated: "2023-03-08T21:30:48.273709455+01:00"
+    `;
+
+    git.getFile.mockResolvedValueOnce(lockFileWithoutRepositories as never);
+    fs.getSiblingFileName.mockReturnValueOnce('helmfile.lock');
+    const execSnapshots = mockExecAll();
+    fs.readLocalFile.mockResolvedValueOnce(
+      lockFileTwoWithoutRepositories as never,
+    );
+    fs.privateCacheDir.mockReturnValue(
+      '/tmp/renovate/cache/__renovate-private-cache',
+    );
+    fs.getParentDir.mockReturnValue('');
+    const updatedDeps = [{ depName: 'dep1' }, { depName: 'dep2' }];
+    expect(
+      await helmfile.updateArtifacts({
+        packageFileName: 'helmfile.yaml',
+        updatedDeps,
+        newPackageFileContent: helmfileYamlWithoutRepositories,
+        config,
+      }),
+    ).toEqual([
+      {
+        file: {
+          type: 'addition',
+          path: 'helmfile.lock',
+          contents: lockFileTwoWithoutRepositories,
+        },
+      },
+    ]);
+    expect(execSnapshots).toMatchObject([
+      { cmd: 'helmfile deps -f helmfile.yaml' },
+    ]);
+  });
+
+  it('log into private OCI registries, returns updated helmfile.lock', async () => {
+    const helmfileYamlOCIPrivateRepo = codeBlock`
+    repositories:
+      - name: private-charts
+        url: ghcr.io/charts
+        oci: true
+    releases:
+      - name: chart
+        chart: private-charts/chart
+        version: 0.12.0
+    `;
+    const lockFileOCIPrivateRepo = codeBlock`
+    version: 0.151.0
+    dependencies:
+    - name: chart
+      repository: oci://ghcr.io/private-charts
+      version: 0.11.0
+    digest: sha256:e284706b71f37b757a536703da4cb148d67901afbf1ab431f7d60a9852ca6eef
+    generated: "2023-03-08T21:32:06.122276997+01:00"
+    `;
+    const lockFileOCIPrivateRepoTwo = codeBlock`
+    version: 0.151.0
+    dependencies:
+    - name: chart
+      repository: oci://ghcr.io/private-charts
+      version: 0.12.0
+    digest: sha256:9d83889176d005effb86041d30c20361625561cbfb439cbd16d7243225bac17c
+    generated: "2023-03-08T21:30:48.273709455+01:00"
+    `;
+    hostRules.add({
+      username: 'test',
+      password: 'password',
+      hostType: 'docker',
+      matchHost: 'ghcr.io',
+    });
+
+    git.getFile.mockResolvedValueOnce(lockFileOCIPrivateRepo as never);
+    fs.getSiblingFileName.mockReturnValueOnce('helmfile.lock');
+    const execSnapshots = mockExecAll();
+    fs.readLocalFile.mockResolvedValueOnce(lockFileOCIPrivateRepoTwo as never);
+    fs.privateCacheDir.mockReturnValue(
+      '/tmp/renovate/cache/__renovate-private-cache',
+    );
+    fs.getParentDir.mockReturnValue('');
+    const updatedDeps = [{ depName: 'dep1' }, { depName: 'dep2' }];
+    expect(
+      await helmfile.updateArtifacts({
+        packageFileName: 'helmfile.yaml',
+        updatedDeps,
+        newPackageFileContent: helmfileYamlOCIPrivateRepo,
+        config,
+      }),
+    ).toEqual([
+      {
+        file: {
+          type: 'addition',
+          path: 'helmfile.lock',
+          contents: lockFileOCIPrivateRepoTwo,
+        },
+      },
+    ]);
+    expect(execSnapshots).toMatchObject([
+      {
+        cmd: 'helm registry login --username test --password password ghcr.io',
+        options: {
+          env: {
+            HELM_REGISTRY_CONFIG:
+              '/tmp/renovate/cache/__renovate-private-cache/registry.json',
+            HELM_REPOSITORY_CONFIG:
+              '/tmp/renovate/cache/__renovate-private-cache/repositories.yaml',
+            HELM_REPOSITORY_CACHE:
+              '/tmp/renovate/cache/__renovate-private-cache/repositories',
+          },
+        },
+      },
+      {
+        cmd: 'helmfile deps -f helmfile.yaml',
+        options: {
+          env: {
+            HELM_REGISTRY_CONFIG:
+              '/tmp/renovate/cache/__renovate-private-cache/registry.json',
+            HELM_REPOSITORY_CONFIG:
+              '/tmp/renovate/cache/__renovate-private-cache/repositories.yaml',
+            HELM_REPOSITORY_CACHE:
+              '/tmp/renovate/cache/__renovate-private-cache/repositories',
+          },
+        },
+      },
+    ]);
+  });
+
   it.each([
     {
       binarySource: 'docker',
       expectedCommands: [
-        { cmd: 'docker pull containerbase/sidecar' },
+        { cmd: 'docker pull ghcr.io/containerbase/sidecar' },
         { cmd: 'docker ps --filter name=renovate_sidecar -aq' },
         {
           cmd:
             'docker run --rm --name=renovate_sidecar --label=renovate_child ' +
             '-v "/tmp/github/some/repo":"/tmp/github/some/repo" ' +
             '-v "/tmp/renovate/cache":"/tmp/renovate/cache" ' +
-            '-e BUILDPACK_CACHE_DIR ' +
+            '-e HELM_EXPERIMENTAL_OCI ' +
+            '-e HELM_REGISTRY_CONFIG ' +
+            '-e HELM_REPOSITORY_CONFIG ' +
+            '-e HELM_REPOSITORY_CACHE ' +
             '-e CONTAINERBASE_CACHE_DIR ' +
             '-w "/tmp/github/some/repo" ' +
-            'containerbase/sidecar ' +
+            'ghcr.io/containerbase/sidecar ' +
             'bash -l -c "' +
             'install-tool helm v3.7.2' +
             ' && ' +
-            'install-tool helmfile v0.129.0' +
+            'install-tool helmfile 0.151.0' +
             ' && ' +
             'install-tool kustomize 5.0.0' +
             ' && ' +
@@ -183,7 +342,7 @@ describe('modules/manager/helmfile/artifacts', () => {
       binarySource: 'install',
       expectedCommands: [
         { cmd: 'install-tool helm v3.7.2' },
-        { cmd: 'install-tool helmfile v0.129.0' },
+        { cmd: 'install-tool helmfile 0.151.0' },
         { cmd: 'install-tool kustomize 5.0.0' },
         { cmd: 'helmfile deps -f helmfile.yaml' },
       ],
@@ -197,15 +356,12 @@ describe('modules/manager/helmfile/artifacts', () => {
       const execSnapshots = mockExecAll();
       fs.readLocalFile.mockResolvedValueOnce(lockFileTwo);
       fs.privateCacheDir.mockReturnValue(
-        '/tmp/renovate/cache/__renovate-private-cache'
+        '/tmp/renovate/cache/__renovate-private-cache',
       );
       fs.getParentDir.mockReturnValue('');
       // helm
       datasource.getPkgReleases.mockResolvedValueOnce({
         releases: [{ version: 'v3.7.2' }],
-      });
-      datasource.getPkgReleases.mockResolvedValueOnce({
-        releases: [{ version: 'v0.129.0' }],
       });
       datasource.getPkgReleases.mockResolvedValueOnce({
         releases: [{ version: '5.0.0' }],
@@ -219,7 +375,7 @@ describe('modules/manager/helmfile/artifacts', () => {
           updatedDeps,
           newPackageFileContent: helmfileYaml,
           config,
-        })
+        }),
       ).toEqual([
         {
           file: {
@@ -230,7 +386,7 @@ describe('modules/manager/helmfile/artifacts', () => {
         },
       ]);
       expect(execSnapshots).toMatchObject(expectedCommands);
-    }
+    },
   );
 
   it.each([
@@ -240,7 +396,7 @@ describe('modules/manager/helmfile/artifacts', () => {
     fs.getSiblingFileName.mockReturnValueOnce('helmfile.lock');
     git.getFile.mockResolvedValueOnce(lockFile);
     fs.privateCacheDir.mockReturnValue(
-      '/tmp/renovate/cache/__renovate-private-cache'
+      '/tmp/renovate/cache/__renovate-private-cache',
     );
     fs.writeLocalFile.mockImplementationOnce(() => {
       throw new Error(errorMessage);
@@ -252,7 +408,7 @@ describe('modules/manager/helmfile/artifacts', () => {
         updatedDeps,
         newPackageFileContent: helmfileYaml,
         config,
-      })
+      }),
     ).toEqual([
       {
         artifactError: {
@@ -260,6 +416,96 @@ describe('modules/manager/helmfile/artifacts', () => {
           stderr: errorMessage,
         },
       },
+    ]);
+  });
+
+  it('updates lockfile with multidoc YAML', async () => {
+    const multidocYaml = codeBlock`
+    apiVersion: source.toolkit.fluxcd.io/v1beta2
+    kind: HelmRepository
+    metadata:
+      name: metallb
+      namespace: flux-system
+    spec:
+      interval: 30m
+      url: https://metallb.github.io/metallb
+    ---
+    apiVersion: helm.toolkit.fluxcd.io/v2beta1
+    kind: HelmRelease
+    metadata:
+      name: metallb
+      namespace: flux-system
+    spec:
+      interval: 5m
+      install:
+        createNamespace: true
+      targetNamespace: metallb-system
+      chart:
+        spec:
+          chart: metallb
+          version: 0.13.10
+          sourceRef:
+            kind: HelmRepository
+            name: metallb
+            namespace: flux-system
+      values:
+        controller:
+          image:
+            repository: quay.io/metallb/controller
+            tag: v0.13.10
+        speaker:
+          image:
+            repository: quay.io/metallb/speaker
+            tag: v0.13.10
+          frr:
+            enabled: false
+    `;
+    const lockFileMultidoc = codeBlock`
+    version: 0.151.0
+    dependencies:
+    - name: metallb
+      repository: https://metallb.github.io/metallb
+      version: 0.13.9
+    digest: sha256:e284706b71f37b757a536703da4cb148d67901afbf1ab431f7d60a9852ca6eef
+    generated: "2023-03-08T21:32:06.122276997+01:00"
+    `;
+    const lockFileMultidocUpdated = codeBlock`
+    version: 0.151.0
+    dependencies:
+    - name: metallb
+      repository: https://metallb.github.io/metallb
+      version: 0.13.10
+    digest: sha256:9d83889176d005effb86041d30c20361625561cbfb439cbd16d7243225bac17c
+    generated: "2023-03-08T21:30:48.273709455+01:00"
+    `;
+
+    git.getFile.mockResolvedValueOnce(lockFileMultidoc as never);
+    fs.getSiblingFileName.mockReturnValueOnce('helmfile.lock');
+    const execSnapshots = mockExecAll();
+    fs.readLocalFile.mockResolvedValueOnce(lockFileMultidocUpdated as never);
+    fs.privateCacheDir.mockReturnValue(
+      '/tmp/renovate/cache/__renovate-private-cache',
+    );
+    fs.getParentDir.mockReturnValue('');
+    const updatedDeps = [{ depName: 'metallb' }];
+    expect(
+      await helmfile.updateArtifacts({
+        packageFileName: 'helmfile.yaml',
+        updatedDeps,
+        newPackageFileContent: multidocYaml,
+        config,
+      }),
+    ).toEqual([
+      {
+        file: {
+          type: 'addition',
+          path: 'helmfile.lock',
+          contents: lockFileMultidocUpdated,
+        },
+      },
+    ]);
+    expect(execSnapshots).toMatchObject([
+      { cmd: 'helmfile deps -f helmfile.yaml' },
     ]);
   });
 });

@@ -2,6 +2,7 @@ import is from '@sindresorhus/is';
 import { quote } from 'shlex';
 import { TEMPORARY_ERROR } from '../../../constants/error-messages';
 import { logger } from '../../../logger';
+import { coerceArray } from '../../../util/array';
 import { exec } from '../../../util/exec';
 import type { ToolConstraint } from '../../../util/exec/types';
 import {
@@ -10,7 +11,13 @@ import {
   writeLocalFile,
 } from '../../../util/fs';
 import { getFile } from '../../../util/git';
+import { regEx } from '../../../util/regex';
+import { Result } from '../../../util/result';
+import { parseYaml } from '../../../util/yaml';
+import { generateHelmEnvs } from '../helmv3/common';
 import type { UpdateArtifact, UpdateArtifactsResult } from '../types';
+import { Doc, LockVersion } from './schema';
+import { generateRegistryLoginCmd, isOCIRegistry } from './utils';
 
 export async function updateArtifacts({
   packageFileName,
@@ -47,11 +54,13 @@ export async function updateArtifacts({
       },
       {
         toolName: 'helmfile',
-        constraint: config.constraints?.helmfile,
+        constraint:
+          config.constraints?.helmfile ??
+          Result.parse(existingLockFileContent, LockVersion).unwrapOrNull(),
       },
     ];
     const needKustomize = updatedDeps.some(
-      (dep) => dep.managerData?.needKustomize
+      (dep) => dep.managerData?.needKustomize,
     );
     if (needKustomize) {
       toolConstraints.push({
@@ -59,9 +68,34 @@ export async function updateArtifacts({
         constraint: config.constraints?.kustomize,
       });
     }
-    await exec(`helmfile deps -f ${quote(packageFileName)}`, {
+
+    const cmd: string[] = [];
+    const docs = parseYaml(newPackageFileContent, {
+      removeTemplates: true,
+      customSchema: Doc,
+      failureBehaviour: 'filter',
+    });
+
+    for (const doc of docs) {
+      for (const value of coerceArray(doc.repositories).filter(isOCIRegistry)) {
+        const loginCmd = await generateRegistryLoginCmd(
+          value.name,
+          `https://${value.url}`,
+          // this extracts the hostname from url like format ghcr.ip/helm-charts
+          value.url.replace(regEx(/\/.*/), ''),
+        );
+
+        if (loginCmd) {
+          cmd.push(loginCmd);
+        }
+      }
+    }
+
+    cmd.push(`helmfile deps -f ${quote(packageFileName)}`);
+    await exec(cmd, {
       docker: {},
-      extraEnv: {},
+      userConfiguredEnv: config.env,
+      extraEnv: generateHelmEnvs(),
       toolConstraints,
     });
 

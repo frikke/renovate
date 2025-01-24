@@ -2,11 +2,11 @@
 
 As end user, you can choose from these ways to run Renovate:
 
-- You use the Mend Renovate app on GitHub, or
-- You self-host Renovate, for example by running the pre-built Docker image, or
+- You use the Mend Renovate App
+- You self-administer/host your own Renovate instance
 - Someone else is hosting Renovate, and you install/configure it for the repositories you choose
 
-If you're using the Mend Renovate App on GitHub, or if someone else is hosting Renovate for you, skip ahead to the [installing & onboarding](./installing-onboarding.md) page.
+If you're using the Mend Renovate App, or if someone else is hosting Renovate for you, skip ahead to the [installing & onboarding](./installing-onboarding.md) page.
 
 ## Self-Hosting Renovate
 
@@ -18,6 +18,8 @@ When self-hosting Renovate you're the "administrator" of the bot, this means you
 - make sure Renovate bot itself is updated
 
 If you're self-hosting Renovate on Windows, read [Self-hosting on Windows](./installing-onboarding.md#self-hosting-on-windows) to prevent line endings from confusing Renovate bot.
+
+If you're running Renovate Community Edition or Renovate Enterprise Edition, refer to the documentation on the [`mend/renovate-ce-ee` GitHub repository](https://github.com/mend/renovate-ce-ee).
 
 ### Available distributions
 
@@ -35,39 +37,37 @@ The `renovate` npm package is compatible with all of Renovate's supported platfo
 Renovate is also distributed as Docker images on Docker Hub (`renovate/renovate`) and GitHub container registry (`ghcr.io/renovatebot/renovate`).
 These Docker images work on all the hosting platforms that Renovate supports.
 
-You must run the Docker images in a `linux/amd64` container.
-We're working on `linux/arm64` container support.
+Both `linux/amd64` and `linux/arm64` architectures are supported, but you may still find some bugs in the `arm64` image.
 You can't run the Docker images in a Windows or macOS container.
 
 In general, you can run Renovate natively on Windows as long as you have all tools it will need (e.g. `npm`, `pipenv`, etc.) preinstalled before you run Renovate.
 
-There are two flavors:
+There are two Docker image flavors:
 
-- The `-slim` image
-- The default "full" image, this is the image you'll get if you use the `latest` tag
+- The default image, which installs required tools at runtime (default for `latest` tag),
+- The `-full` image, which comes with latest or very recent versions of every tool pre-installed
 
-##### The slim image
+##### The default image (formerly `slim`)
 
-The `-slim` image only comes with the Node.js environment.
-By default, the image installs the required tools when needed.
-We recommend the `-slim` image for most users.
+The default image only comes with the Node.js environment.
+Renovate will then install any needed tools when it runs.
+Read the `binarySource=install` documentation for more details.
+We recommend this default image for most users.
+
+Renovate supports a persistent cache for downloaded tools, so that it only needs to unpack the tools on later runs.
+Use the [`containerbaseDir` config option](../self-hosted-configuration.md#containerbasedir) to control where Renovate stores its containerbase cache.
 
 If you want, you can map the Docker socket into the container so that Renovate can dynamically invoke "sidecar" images when needed.
 You'll need to set `binarySource=docker` for this to work.
-Read the [`binarySource` config option docs](../self-hosted-configuration.md/#binarysource) for more information.
+Read the [`binarySource` config option docs](../self-hosted-configuration.md#binarysource) for more information.
 
-##### The default image
+##### The full image
 
-The default image comes with most package managers that Renovate supports, but not _all_ package managers.
-
-You must set `binarySource=global`, if you don't then Renovate still installs the latest version of the tools or the requested version from the repository.
+The `-full` image comes with most package managers that Renovate supports, but not _all_ package managers.
 Update your Docker images regularly to keep the pre-installed tools up-to-date.
 
-Renovate supports a persistent cache for downloaded tools, so that it only needs to unpack the tools on later runs.
-Use the [`containerbaseDir` config option](../self-hosted-configuration.md/#containerbasedir) to control where Renovate stores its containerbase cache.
-
-The default image is for users who don't want to download or install things at runtime.
-The default image has some downsides, because it:
+The full image is for users who don't want to download or install things at runtime.
+This image has some downsides, because it:
 
 - Comes pre-installed with _one_ version of each language/manager - usually the latest
 - Weighs several gigabytes
@@ -83,9 +83,10 @@ The Renovate team provide a ["Renovate Runner"](https://gitlab.com/renovate-bot/
 This supports both `gitlab.com` and self-hosted GitLab.
 Details for how it works can be found in the project.
 
-#### Mend Renovate On-Premises
+#### Mend Renovate Community Edition / Enterprise Edition
 
-Mend Renovate On-Premises (WSOP) started out as a commercial product "Renovate Pro", but was renamed and made free to use when Renovate became a part of Mend (formerly WhiteSource) in 2019.
+Mend Renovate Community Edition (Renovate CE) and Enterprise Edition (Renovate EE) are closed-source offerings of Renovate for self-hosted users.
+Renovate CE and Renovate EE have support for GitHub (both `github.com` and GitHub Enterprise Server) as well as GitLab self-hosted.
 It is built similarly to the default "full" Renovate image described above, but with these differences:
 
 - It is a stateful app and does not exit after processing all repositories
@@ -94,8 +95,15 @@ It is built similarly to the default "full" Renovate image described above, but 
 - It is released every 1-2 months in a slower, more stable cadence than Renovate OSS, which releases on every commit
 - It's licensed using an end-user license agreement (EULA) and not the Affero General Public License (AGPL)
 
-WSOP supports GitHub (both `github.com` and GitHub Enterprise Server) as well as GitLab self-hosted.
-Documentation can be found in its public GitHub repository [`whitesource/renovate-on-prem`](https://github.com/whitesource/renovate-on-prem).
+Plus, the Enterprise Edition has:
+
+- Horizontal scaling to run multiple 'worker' containers
+- Dedicated support from Mend.io
+- Premium features, including Smart Merge Control
+
+Go to the Mend.io website to learn more about [Renovate Enterprise Edition](https://www.mend.io/renovate-enterprise/).
+
+To learn how to configure Renovate CE or Renovate EE, read the documentation on the public GitHub repository [`mend/renovate-ce-ee`](https://github.com/mend/renovate-ce-ee).
 
 #### Mend Remediate
 
@@ -106,11 +114,11 @@ Mend Remediate supports GitHub Enterprise Server, GitLab self-hosted, and Bitbuc
 
 #### Forking Renovate app
 
-"Forking Renovate" is the sister app to the Mend Renovate App on GitHub.com.
+"Forking Renovate" is the sister app to the Mend Renovate App.
 The difference is that Forking Renovate does not need `write` permissions to create branches within the repo, and instead submits PRs from its own fork.
 Because of how it works, it functions on public repositories only and additionally cannot support `automerge` capabilities.
 
-[Install Forking Renovate from GitHub App](https://github.com/apps/forking-renovate).
+[Install Forking Renovate from GitHub App store](https://github.com/apps/forking-renovate).
 
 ##### Benefits
 
@@ -122,7 +130,6 @@ If you use Forking Renovate, you'll miss out on these features of the regular Re
 
 - Automerge
 - The `baseBranches` config option
-- The app dashboard (`app.renovatebot.com`)
 
 ### Hosting Renovate
 
@@ -134,7 +141,7 @@ For the npm package approach or Docker images, you will need some form of VM or 
 In all the above cases you must make sure that some form of cron-like capability exists to schedule when Renovate runs.
 We recommend that you run Renovate hourly, if possible.
 
-Mend Renovate On-Premises and Mend Remediate both run as long-lived containers, so they do not need any additional cron-like concept as it is built-in.
+Mend Renovate On-Premises and Mend Remediate both run as long-lived containers, so they do not need any cron-like concept as it is built-in.
 
 ### Global config
 
@@ -195,18 +202,18 @@ We also recommend you configure `config.gitAuthor` with the same identity as you
 
 Read the platform-specific docs to learn how to setup authentication on your platform:
 
-- [Azure DevOps](https://docs.renovatebot.com/modules/platform/azure/)
-- [Bitbucket Cloud](https://docs.renovatebot.com/modules/platform/bitbucket/)
-- [Bitbucket Server](https://docs.renovatebot.com/modules/platform/bitbucket-server/)
-- [Gitea and Forgejo](https://docs.renovatebot.com/modules/platform/gitea/)
-- [github.com and GitHub Enterprise Server](https://docs.renovatebot.com/modules/platform/github/)
-- [GitLab](https://docs.renovatebot.com/modules/platform/gitlab/)
+- [Azure DevOps](../modules/platform/azure/index.md)
+- [Bitbucket Cloud](../modules/platform/bitbucket/index.md)
+- [Bitbucket Server](../modules/platform/bitbucket-server/index.md)
+- [Gitea and Forgejo](../modules/platform/gitea/index.md)
+- [github.com and GitHub Enterprise Server](../modules/platform/github/index.md)
+- [GitLab](../modules/platform/gitlab/index.md)
 
-### GitHub.com token for release notes
+### GitHub.com token for changelogs
 
 If you are running on any platform except github.com, you should also set the environment variable `GITHUB_COM_TOKEN` and put the Personal Access Token for github.com in it.
 This account can be _any_ account on GitHub, and needs only `read-only` access.
-It's used when fetching release notes for repositories in order to increase the hourly API limit.
+It's used when fetching changelogs for repositories in order to increase the hourly API limit.
 It's also OK to configure the same as a host rule instead, if you prefer that.
 
 <!-- prettier-ignore -->

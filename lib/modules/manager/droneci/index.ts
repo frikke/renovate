@@ -1,10 +1,11 @@
-import type { ProgrammingLanguage } from '../../../constants';
+import type { Category } from '../../../constants';
 import { DockerDatasource } from '../../datasource/docker';
 import { extractPackageFile } from './extract';
 
-export const language: ProgrammingLanguage = 'docker';
-
 export { extractPackageFile };
+
+export const url = 'https://docs.drone.io';
+export const categories: Category[] = ['ci'];
 
 export const defaultConfig = {
   fileMatch: ['(^|/)\\.drone\\.yml$'],

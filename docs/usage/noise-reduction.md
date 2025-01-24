@@ -31,14 +31,14 @@ In that case you might create a config like this:
 {
   "packageRules": [
     {
-      "matchPackagePatterns": ["eslint"],
+      "matchPackageNames": ["/eslint/"],
       "groupName": "eslint"
     }
   ]
 }
 ```
 
-By setting `matchPackagePatterns` to "eslint", it means that any package with ESLint anywhere in its name will be grouped into a `renovate/eslint` branch and related PR.
+By setting `matchPackageNames` to `/eslint/`, it means that any package with eslint anywhere in its name will be grouped into a `renovate/eslint` branch and related PR.
 
 ### Be smart about grouping dependencies
 
@@ -54,12 +54,12 @@ Grouping dependencies versus single PRs:
 
 ## Scheduling Renovate
 
-For a high level overview of scheduling when Renovate bot runs, read the [key concepts, scheduling](https://docs.renovatebot.com/key-concepts/scheduling/) docs.
+For a high level overview of scheduling when Renovate bot runs, read the [key concepts, scheduling](./key-concepts/scheduling.md) docs.
 
 On its own, the Renovate CLI tool runs once and then exits.
 Hence, it only runs as often as its administrator sets it to (e.g. via `cron`).
 
-For the [Renovate app on GitHub](https://github.com/apps/renovate), it currently runs continuously using a job queue that gets refreshed hourly, or when you make relevant commits to your repository.
+For [the Mend Renovate App](https://github.com/apps/renovate), it currently runs continuously using a job queue that gets refreshed hourly, or when you make relevant commits to your repository.
 You can expect to get PRs at any time of the day, e.g. soon after versions are published to npm.
 
 Receiving PRs at any hour can increase the feeling of being "overwhelmed" by updates and possibly interrupt your flow during working hours, so many Renovate users also consider reducing Renovate's schedule to be outside their normal working hours, for example weeknights and weekends.
@@ -87,13 +87,14 @@ Remember our example of grouping all `eslint` packages?
 If you think about it, updates to `eslint` rules don't exactly need to be applied in real time!
 You don't want to get too far behind, so how about we update `eslint` packages only once a month?
 
-```json
+```json title="Update ESLint packages once a month"
 {
   "packageRules": [
     {
-      "matchPackagePatterns": ["eslint"],
+      "description": "Schedule updates on first day of each month",
+      "matchPackageNames": ["/eslint/"],
       "groupName": "eslint",
-      "schedule": ["on the first day of the month"]
+      "schedule": ["* * 1 * *"]
     }
   ]
 }
@@ -101,13 +102,14 @@ You don't want to get too far behind, so how about we update `eslint` packages o
 
 Or perhaps at least weekly:
 
-```json
+```json title="Update ESLint packages weekly"
 {
   "packageRules": [
     {
-      "matchPackagePatterns": ["eslint"],
+      "description": "Schedule updates on Monday mornings(before 4 AM)",
+      "matchPackageNames": ["/eslint/"],
       "groupName": "eslint",
-      "schedule": ["before 2am on monday"]
+      "schedule": ["* 0-3 * * 1"]
     }
   ]
 }
@@ -123,7 +125,7 @@ Granularity must be at least one hour.
 Automerging is a Renovate feature that can save you a lot of time/noise directly, while also benefiting grouping and scheduling.
 In short: it means that Renovate can merge PRs or even branches itself if they pass your tests.
 
-We recommend that you enable automerge for any type of dependency update where you would just select Merge anyway.
+We recommend that you enable automerge for any type of dependency update where you would select Merge anyway.
 We all know that there are some types of updates that we (nearly) always verify manually before merging, and plenty of others that we don't bother looking at unless tests fail.
 Every time you select Merge on a Renovate PR without manually testing it, you should consider if you can enable automerge and save yourself the time in future.
 
@@ -161,13 +163,14 @@ This is a lot better than you waking up to two PRs and then having to deal with 
 Remember our running `eslint` example?
 Let's automerge it if all the linting updates pass:
 
-```json
+```json title="Automerge ESLint packages"
 {
   "packageRules": [
     {
-      "matchPackagePatterns": ["eslint"],
+      "description": "Schedule updates on Monday mornings(before 4 AM)",
+      "matchPackageNames": ["/eslint/"],
       "groupName": "eslint",
-      "schedule": ["before 2am on monday"],
+      "schedule": ["* 0-3 * * 1"],
       "automerge": true,
       "automergeType": "branch"
     }
@@ -175,7 +178,7 @@ Let's automerge it if all the linting updates pass:
 }
 ```
 
-Have you come up with a rule that you think others would benefit from?
+Have you come up with a rule that would help others?
 How about a PR to [our presets](https://github.com/renovatebot/renovate/tree/main/lib/config/presets/internal)?
 For example the above rule could be named `":automergeEslintWeekly"` in `schedule.ts`.
 

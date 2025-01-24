@@ -25,7 +25,7 @@ Renovate:
 1. Checks if any newer versions exist
 1. Raises Pull Requests for available updates
 
-The Pull Requests patch the package files directly, and include Release Notes for the newer versions (if they are available).
+The Pull Requests patch the package files directly, and include changelogs for the newer versions (if they are available).
 
 By default:
 
@@ -51,15 +51,15 @@ A simplified example:
 
 ### Custom dependency extraction
 
-Renovate supports 60+ types of package files.
+Renovate supports 90+ types of package files.
 By default, Renovate finds most dependencies, but there are exceptions.
 This can be because:
 
 - The package manager/file format is not supported, or
 - The file format is not a standard or is proprietary
 
-If your dependencies are not found by default, you can use our "regex" manager to set your own custom patterns to extract dependencies.
-You configure the regex manager by telling it:
+If your dependencies are not found by default, you can use our `custom` manager to set your own custom patterns to extract dependencies.
+You configure the custom manager by telling it:
 
 - Which file pattern(s) to match
 - How to find the dependency name and version from within the file
@@ -121,15 +121,15 @@ Renovate finds and updates internal dependencies just like external or Open Sour
 
 Renovate's automerge feature is really useful for internal dependencies where you can say "if it passes tests let's merge it".
 
-To learn more about "automerge" read the [key concepts, automerge](https://docs.renovatebot.com/key-concepts/automerge/) documentation.
+To learn more about "automerge" read the [key concepts, automerge](../key-concepts/automerge.md) documentation.
 
 #### Example of automerging internal dependencies
 
 We use these Renovate features to automerge an internal dependency:
 
-- [Git submodule support](https://docs.renovatebot.com/modules/manager/git-submodules/)
-- [`automerge`](https://docs.renovatebot.com/configuration-options/#automerge) set to `true`
-- [`automergeType`](https://docs.renovatebot.com/configuration-options/#automergetype) set to `branch`
+- [Git submodule support](../modules/manager/git-submodules/index.md)
+- [`automerge`](../configuration-options.md#automerge) set to `true`
+- [`automergeType`](../configuration-options.md#automergetype) set to `branch`
 
 ##### Background information
 
@@ -199,8 +199,6 @@ Here's how it works:
 
 #### Benefits of using Dependency Dashboard Approval
 
-Benefits of using Dependency Dashboard Approval:
-
 - By not raising PRs automatically, it allows you to request updates on-demand when you're ready, and
 - It offers you an alternative to permanently ignoring/disabling certain types of updates, like major updates
 
@@ -213,7 +211,7 @@ This also means that you might want a similar config for all of your repositorie
 You can use configuration "presets" to avoid duplicating your configuration across your repositories.
 
 Configuration presets are JSON configuration files which are committed to repositories and then referenced from others.
-Renovate includes over 100 built-in presets, like the default recommended `config:base` preset.
+Renovate includes over 100 built-in presets, like the default recommended `config:recommended` preset.
 
 The typical workflow for a company is:
 

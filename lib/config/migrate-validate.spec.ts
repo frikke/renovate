@@ -1,4 +1,5 @@
-import { RenovateConfig, getConfig } from '../../test/util';
+import type { RenovateConfig } from '../../test/util';
+import { getConfig } from './defaults';
 import { migrateAndValidate } from './migrate-validate';
 
 let config: RenovateConfig;
@@ -38,7 +39,7 @@ describe('config/migrate-validate', () => {
       const input: RenovateConfig = {};
       const res = await migrateAndValidate(
         { ...config, repoIsOnboarded: true },
-        input
+        input,
       );
       expect(res.warnings).toBeUndefined();
       expect(res).toMatchSnapshot();

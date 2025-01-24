@@ -5,12 +5,14 @@ import {
   REPOSITORY_NO_CONFIG,
 } from '../../../../constants/error-messages';
 import { logger } from '../../../../logger';
-import { Pr, platform } from '../../../../modules/platform';
+import type { Pr } from '../../../../modules/platform';
+import { platform } from '../../../../modules/platform';
 import { ensureComment } from '../../../../modules/platform/comment';
 import { scm } from '../../../../modules/platform/scm';
 import { getCache } from '../../../../util/cache/repository';
 import { readLocalFile } from '../../../../util/fs';
 import { getBranchCommit } from '../../../../util/git';
+import { getSemanticCommitPrTitle } from '../common';
 
 async function findFile(fileName: string): Promise<boolean> {
   logger.debug(`findFile(${fileName})`);
@@ -30,28 +32,43 @@ async function configFileExists(): Promise<boolean> {
 
 async function packageJsonConfigExists(): Promise<boolean> {
   try {
-    // TODO #7154
+    // TODO #22198
     const pJson = JSON.parse((await readLocalFile('package.json', 'utf8'))!);
     if (pJson.renovate) {
       return true;
     }
-  } catch (err) {
+  } catch {
     // Do nothing
   }
   return false;
 }
 
-function closedPrExists(config: RenovateConfig): Promise<Pr | null> {
-  return platform.findPr({
-    branchName: config.onboardingBranch!,
-    prTitle: config.onboardingPrTitle,
-    state: '!open',
-  });
+async function closedPrExists(config: RenovateConfig): Promise<Pr | null> {
+  return (
+    (await platform.findPr({
+      branchName: config.onboardingBranch!,
+      prTitle: config.onboardingPrTitle,
+      state: '!open',
+      targetBranch: config.baseBranch,
+    })) ??
+    (await platform.findPr({
+      branchName: config.onboardingBranch!,
+      prTitle: getSemanticCommitPrTitle(config),
+      state: '!open',
+      targetBranch: config.baseBranch,
+    }))
+  );
 }
 
 export async function isOnboarded(config: RenovateConfig): Promise<boolean> {
   logger.debug('isOnboarded()');
   const title = `Action required: Add a Renovate config`;
+
+  // Repo is onboarded if in silent mode
+  if (config.mode === 'silent') {
+    logger.debug('Silent mode enabled so repo is considered onboarded');
+    return true;
+  }
 
   // Repo is onboarded if global config is bypassing onboarding and does not require a
   // configuration file.
@@ -88,7 +105,7 @@ export async function isOnboarded(config: RenovateConfig): Promise<boolean> {
     logger.debug('Checking cached config file name');
     try {
       const configFileContent = await platform.getJsonFile(
-        cache.configFileName
+        cache.configFileName,
       );
       if (configFileContent) {
         if (
@@ -98,12 +115,12 @@ export async function isOnboarded(config: RenovateConfig): Promise<boolean> {
           logger.debug('Existing config file confirmed');
           logger.debug(
             { fileName: cache.configFileName, config: configFileContent },
-            'Repository config'
+            'Repository config',
           );
           return true;
         }
       }
-    } catch (err) {
+    } catch {
       // probably file doesn't exist
     }
     logger.debug('Existing config file no longer exists');
@@ -141,14 +158,17 @@ export async function isOnboarded(config: RenovateConfig): Promise<boolean> {
     await ensureComment({
       number: closedOnboardingPr.number,
       topic: `Renovate is disabled`,
-      content: `Renovate is disabled due to lack of config. If you wish to re-enable it, you can either (a) commit a config file to your base branch, or (b) rename this closed PR to trigger a replacement onboarding PR.`,
+      content: `Renovate is disabled because there is no Renovate configuration file. To enable Renovate, you can either (a) change this PR's title to get a new onboarding PR, and merge the new onboarding PR, or (b) create a Renovate config file, and commit that file to your base branch.`,
     });
   }
   throw new Error(REPOSITORY_CLOSED_ONBOARDING);
 }
 
 export async function getOnboardingPr(
-  config: RenovateConfig
+  config: RenovateConfig,
 ): Promise<Pr | null> {
-  return await platform.getBranchPr(config.onboardingBranch!);
+  return await platform.getBranchPr(
+    config.onboardingBranch!,
+    config.baseBranch,
+  );
 }

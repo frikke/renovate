@@ -47,7 +47,7 @@ export function resolveBaseUrl(baseUrl: string, input: string | URL): string {
   let pathname;
   try {
     ({ host, pathname } = new URL(inputString));
-  } catch (e) {
+  } catch {
     pathname = inputString;
   }
 
@@ -74,6 +74,8 @@ export function getQueryString(params: Record<string, any>): string {
   for (const [k, v] of Object.entries(params)) {
     if (is.array<object>(v)) {
       for (const item of v) {
+        // TODO: fix me?
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         usp.append(k, item.toString());
       }
     } else {
@@ -83,26 +85,30 @@ export function getQueryString(params: Record<string, any>): string {
   return usp.toString();
 }
 
-export function validateUrl(url?: string, httpOnly = true): boolean {
-  if (!url) {
+export function isHttpUrl(url: unknown): boolean {
+  if (!is.nonEmptyString(url)) {
     return false;
   }
   try {
     const { protocol } = new URL(url);
-    return httpOnly ? !!protocol.startsWith('http') : !!protocol;
-  } catch (err) {
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
     return false;
   }
 }
 
-export function parseUrl(url: string | undefined | null): URL | null {
+export function parseUrl(url: URL | string | undefined | null): URL | null {
   if (!url) {
     return null;
   }
 
+  if (url instanceof URL) {
+    return url;
+  }
+
   try {
     return new URL(url);
-  } catch (err) {
+  } catch {
     return null;
   }
 }
@@ -119,7 +125,7 @@ export function createURLFromHostOrURL(url: string): URL | null {
 export type LinkHeaderLinks = _parseLinkHeader.Links;
 
 export function parseLinkHeader(
-  linkHeader: string | null | undefined
+  linkHeader: string | null | undefined,
 ): LinkHeaderLinks | null {
   if (!is.nonEmptyString(linkHeader)) {
     return null;
@@ -129,4 +135,17 @@ export function parseLinkHeader(
     return null;
   }
   return _parseLinkHeader(linkHeader);
+}
+
+/**
+ * prefix https:// to hosts with port or path
+ */
+export function massageHostUrl(url: string): string {
+  if (!url.includes('://') && url.includes('/')) {
+    return 'https://' + url;
+  } else if (!url.includes('://') && url.includes(':')) {
+    return 'https://' + url;
+  } else {
+    return url;
+  }
 }

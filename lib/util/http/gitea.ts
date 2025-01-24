@@ -1,11 +1,6 @@
 import is from '@sindresorhus/is';
 import { resolveBaseUrl } from '../url';
-import type {
-  HttpOptions,
-  HttpRequestOptions,
-  HttpResponse,
-  InternalHttpOptions,
-} from './types';
+import type { HttpOptions, HttpResponse, InternalHttpOptions } from './types';
 import { Http } from '.';
 
 let baseUrl: string;
@@ -35,13 +30,13 @@ function resolveUrl(path: string, base: string): URL {
 }
 
 export class GiteaHttp extends Http<GiteaHttpOptions> {
-  constructor(options?: HttpOptions) {
-    super('gitea', options);
+  constructor(hostType?: string, options?: HttpOptions) {
+    super(hostType ?? 'gitea', options);
   }
 
   protected override async request<T>(
     path: string,
-    options?: InternalHttpOptions & GiteaHttpOptions & HttpRequestOptions<T>
+    options?: InternalHttpOptions & GiteaHttpOptions,
   ): Promise<HttpResponse<T>> {
     const resolvedUrl = resolveUrl(path, options?.baseUrl ?? baseUrl);
     const opts = {

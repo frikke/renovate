@@ -1,4 +1,5 @@
-import { KnownProps, parse } from 'editorconfig';
+import type { KnownProps } from 'editorconfig';
+import { parse } from 'editorconfig';
 import upath from 'upath';
 import { GlobalConfig } from '../../config/global';
 import { logger } from '../../logger';
@@ -7,12 +8,13 @@ import type { IndentationType } from './indentation-type';
 
 export class EditorConfig {
   public static async getCodeFormat(fileName: string): Promise<CodeFormat> {
-    const { localDir } = GlobalConfig.get();
+    const localDir = GlobalConfig.get('localDir', '');
     try {
       const knownProps = await parse(upath.join(localDir, fileName));
       return {
         indentationSize: EditorConfig.getIndentationSize(knownProps),
         indentationType: EditorConfig.getIndentationType(knownProps),
+        maxLineLength: knownProps.max_line_length as number | 'off' | undefined,
       };
     } catch (err) {
       logger.warn({ err }, 'Failed to parse editor config');
@@ -21,7 +23,7 @@ export class EditorConfig {
   }
 
   private static getIndentationType(
-    knownProps: KnownProps
+    knownProps: KnownProps,
   ): IndentationType | undefined {
     const { indent_style: indentStyle } = knownProps;
 
@@ -37,7 +39,7 @@ export class EditorConfig {
   }
 
   private static getIndentationSize(
-    knownProps: KnownProps
+    knownProps: KnownProps,
   ): number | undefined {
     const indentSize = Number(knownProps.indent_size);
 

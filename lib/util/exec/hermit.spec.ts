@@ -1,4 +1,4 @@
-import os from 'node:os';
+import { codeBlock } from 'common-tags';
 import _findUp from 'find-up';
 import upath from 'upath';
 import { mockExecAll } from '../../../test/exec-util';
@@ -43,7 +43,7 @@ describe('util/exec/hermit', () => {
         expect(await findHermitCwd(cwd)).toBe(upath.join(localDir, expected));
 
         expect(findUp.mock.calls[0][1]?.cwd).toBe(cwd);
-      }
+      },
     );
 
     it('should throw error when hermit cwd is not found', async () => {
@@ -62,11 +62,10 @@ describe('util/exec/hermit', () => {
     it('should return hermit environment variables when hermit env returns successfully', async () => {
       findUp.mockResolvedValueOnce(upath.join(localDir, 'bin/hermit'));
       mockExecAll({
-        stdout:
-          [
-            'GOBIN=/usr/src/app/repository-a/.hermit/go/bin',
-            'PATH=/usr/src/app/repository-a/bin',
-          ].join(os.EOL) + os.EOL,
+        stdout: codeBlock`
+          GOBIN=/usr/src/app/repository-a/.hermit/go/bin
+          PATH=/usr/src/app/repository-a/bin
+        `,
         stderr: '',
       });
 
@@ -76,7 +75,7 @@ describe('util/exec/hermit', () => {
       const resp = await getHermitEnvs(
         partial<RawExecOptions>({
           cwd: fullCwd,
-        })
+        }),
       );
 
       expect(findUp.mock.calls[0][1]?.cwd).toEqual(fullCwd);

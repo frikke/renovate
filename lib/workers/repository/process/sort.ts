@@ -20,18 +20,23 @@ export function sortBranches(branches: Partial<BranchConfig>[]): void {
       return 1;
     }
 
-    // TODO #7154
-    if (a.prPriority !== b.prPriority) {
-      return b.prPriority! - a.prPriority!;
+    // TODO #22198
+    const prPriorityDiff = getPrPriority(b) - getPrPriority(a);
+    if (prPriorityDiff !== 0) {
+      return prPriorityDiff;
     }
-    // TODO #7154
+    // TODO #22198
     const sortDiff =
       sortOrder.indexOf(a.updateType!) - sortOrder.indexOf(b.updateType!);
     if (sortDiff !== 0) {
       return sortDiff;
     }
-    // TODO #7154
+    // TODO #22198
     // Sort by prTitle if updateType is the same
     return a.prTitle! < b.prTitle! ? -1 : 1;
   });
+}
+
+function getPrPriority(branch: Partial<BranchConfig>): number {
+  return branch.prPriority ?? 0;
 }
