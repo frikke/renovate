@@ -1,13 +1,13 @@
 import { mergeChildConfig } from '../../../config';
 import { getConfig } from '../../../config/defaults';
-import { getManagerList } from '../../../modules/manager';
+import { allManagersList } from '../../../modules/manager';
 import { generateFingerprintConfig } from './extract-fingerprint-config';
 
 describe('workers/repository/extract/extract-fingerprint-config', () => {
   it('filter with enabledManagers', () => {
     const config = mergeChildConfig(getConfig(), {
       registryAliases: {
-        stable: 'http://some.link', // intentionally placing the field incorrectly
+        stable: 'http://some.link',
       },
       ignorePaths: ['ignore-path-1'],
       includePaths: ['include-path-1'],
@@ -19,9 +19,10 @@ describe('workers/repository/extract/extract-fingerprint-config', () => {
           notStable: 'http://some.link.2',
         },
       },
-      enabledManagers: ['npm', 'regex'],
-      regexManagers: [
+      enabledManagers: ['npm', 'custom.regex'],
+      customManagers: [
         {
+          customType: 'regex',
           fileMatch: ['js', '***$}{]]['],
           matchStrings: ['^(?<depName>foo)(?<currentValue>bar)$'],
           datasourceTemplate: 'maven',
@@ -34,11 +35,15 @@ describe('workers/repository/extract/extract-fingerprint-config', () => {
 
     expect(fingerprintConfig.managerList).toEqual(new Set(['npm', 'regex']));
     expect(
-      fingerprintConfig.managers.find((manager) => manager.manager === 'npm')
+      fingerprintConfig.managers.find((manager) => manager.manager === 'npm'),
     ).toEqual({
       enabled: true,
       fileList: [],
-      fileMatch: ['(^|/)package\\.json$', 'hero.json'],
+      fileMatch: [
+        '(^|/)package\\.json$',
+        '(^|/)pnpm-workspace\\.yaml$',
+        'hero.json',
+      ],
       ignorePaths: ['ignore-path-2'],
       includePaths: ['include-path-2'],
       manager: 'npm',
@@ -46,11 +51,12 @@ describe('workers/repository/extract/extract-fingerprint-config', () => {
       npmrcMerge: false,
       registryAliases: {
         notStable: 'http://some.link.2',
+        stable: 'http://some.link',
       },
       skipInstalls: null,
     });
     expect(
-      fingerprintConfig.managers.find((manager) => manager.manager === 'regex')
+      fingerprintConfig.managers.find((manager) => manager.manager === 'regex'),
     ).toEqual({
       fileMatch: ['js', '***$}{]]['],
       ignorePaths: ['ignore-path-1'],
@@ -77,13 +83,17 @@ describe('workers/repository/extract/extract-fingerprint-config', () => {
       npm: { fileMatch: ['hero.json'] },
     });
     const fingerprintConfig = generateFingerprintConfig(config);
-    expect(fingerprintConfig.managerList).toEqual(new Set(getManagerList()));
+    expect(fingerprintConfig.managerList).toEqual(new Set(allManagersList));
     expect(
-      fingerprintConfig.managers.find((manager) => manager.manager === 'npm')
+      fingerprintConfig.managers.find((manager) => manager.manager === 'npm'),
     ).toEqual({
       enabled: true,
       fileList: [],
-      fileMatch: ['(^|/)package\\.json$', 'hero.json'],
+      fileMatch: [
+        '(^|/)package\\.json$',
+        '(^|/)pnpm-workspace\\.yaml$',
+        'hero.json',
+      ],
       ignorePaths: ['**/node_modules/**', '**/bower_components/**'],
       includePaths: [],
       manager: 'npm',
@@ -94,8 +104,8 @@ describe('workers/repository/extract/extract-fingerprint-config', () => {
     });
     expect(
       fingerprintConfig.managers.find(
-        (manager) => manager.manager === 'dockerfile'
-      )
+        (manager) => manager.manager === 'dockerfile',
+      ),
     ).toEqual({
       enabled: true,
       fileList: [],
@@ -112,7 +122,7 @@ describe('workers/repository/extract/extract-fingerprint-config', () => {
       skipInstalls: null,
     });
     expect(
-      fingerprintConfig.managers.find((manager) => manager.manager === 'regex')
+      fingerprintConfig.managers.find((manager) => manager.manager === 'regex'),
     ).toBeUndefined();
   });
 });

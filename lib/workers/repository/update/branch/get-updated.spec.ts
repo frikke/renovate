@@ -1,11 +1,17 @@
+import { mockDeep } from 'jest-mock-extended';
 import { git, mocked } from '../../../../../test/util';
 import { GitRefsDatasource } from '../../../../modules/datasource/git-refs';
 import * as _batectWrapper from '../../../../modules/manager/batect-wrapper';
 import * as _bundler from '../../../../modules/manager/bundler';
 import * as _composer from '../../../../modules/manager/composer';
 import * as _gitSubmodules from '../../../../modules/manager/git-submodules';
+import * as _gomod from '../../../../modules/manager/gomod';
 import * as _helmv3 from '../../../../modules/manager/helmv3';
 import * as _npm from '../../../../modules/manager/npm';
+import * as _pep621 from '../../../../modules/manager/pep621';
+import * as _pipCompile from '../../../../modules/manager/pip-compile';
+import * as _poetry from '../../../../modules/manager/poetry';
+import type { PackageFile } from '../../../../modules/manager/types';
 import type { BranchConfig, BranchUpgradeConfig } from '../../../types';
 import * as _autoReplace from './auto-replace';
 import { getUpdatedPackageFiles } from './get-updated';
@@ -13,17 +19,25 @@ import { getUpdatedPackageFiles } from './get-updated';
 const bundler = mocked(_bundler);
 const composer = mocked(_composer);
 const gitSubmodules = mocked(_gitSubmodules);
+const gomod = mocked(_gomod);
 const helmv3 = mocked(_helmv3);
 const npm = mocked(_npm);
 const batectWrapper = mocked(_batectWrapper);
 const autoReplace = mocked(_autoReplace);
+const pep621 = mocked(_pep621);
+const pipCompile = mocked(_pipCompile);
+const poetry = mocked(_poetry);
 
 jest.mock('../../../../modules/manager/bundler');
 jest.mock('../../../../modules/manager/composer');
 jest.mock('../../../../modules/manager/helmv3');
 jest.mock('../../../../modules/manager/npm');
 jest.mock('../../../../modules/manager/git-submodules');
+jest.mock('../../../../modules/manager/gomod', () => mockDeep());
 jest.mock('../../../../modules/manager/batect-wrapper');
+jest.mock('../../../../modules/manager/pep621');
+jest.mock('../../../../modules/manager/pip-compile');
+jest.mock('../../../../modules/manager/poetry');
 jest.mock('../../../../util/git');
 jest.mock('./auto-replace');
 
@@ -70,6 +84,7 @@ describe('workers/repository/update/branch/get-updated', () => {
         reuseExistingBranch: undefined,
         updatedArtifacts: [],
         updatedPackageFiles: [],
+        artifactNotices: [],
       });
     });
 
@@ -103,6 +118,7 @@ describe('workers/repository/update/branch/get-updated', () => {
         reuseExistingBranch: undefined,
         updatedArtifacts: [],
         updatedPackageFiles: [],
+        artifactNotices: [],
       });
     });
 
@@ -110,7 +126,8 @@ describe('workers/repository/update/branch/get-updated', () => {
       config.reuseExistingBranch = true;
       config.upgrades.push({
         manager: 'npm',
-      } as never);
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
       await expect(getUpdatedPackageFiles(config)).rejects.toThrow();
     });
 
@@ -119,7 +136,8 @@ describe('workers/repository/update/branch/get-updated', () => {
       config.upgrades.push({
         packageFile: 'package.json',
         manager: 'npm',
-      } as never);
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
       npm.updateDependency.mockReturnValue('some new content');
       const res = await getUpdatedPackageFiles(config);
       expect(res).toMatchSnapshot({
@@ -169,11 +187,60 @@ describe('workers/repository/update/branch/get-updated', () => {
       });
     });
 
+    it('handles artifact notices', async () => {
+      config.reuseExistingBranch = true;
+      config.upgrades.push({
+        packageFile: 'go.mod',
+        manager: 'gomod',
+        branchName: 'foo/bar',
+      });
+      gomod.updateDependency.mockReturnValue('some new content');
+      gomod.updateArtifacts.mockResolvedValueOnce([
+        {
+          file: {
+            type: 'addition',
+            path: 'go.mod',
+            contents: 'some content',
+          },
+          notice: {
+            file: 'go.mod',
+            message: 'some notice',
+          },
+        },
+      ]);
+      const res = await getUpdatedPackageFiles(config);
+      expect(res).toEqual({
+        artifactErrors: [],
+        artifactNotices: [
+          {
+            file: 'go.mod',
+            message: 'some notice',
+          },
+        ],
+        reuseExistingBranch: false,
+        updatedArtifacts: [
+          {
+            contents: 'some content',
+            path: 'go.mod',
+            type: 'addition',
+          },
+        ],
+        updatedPackageFiles: [
+          {
+            contents: 'some new content',
+            path: 'go.mod',
+            type: 'addition',
+          },
+        ],
+      });
+    });
+
     it('handles lockFileMaintenance', async () => {
       config.upgrades.push({
         manager: 'composer',
         updateType: 'lockFileMaintenance',
-      } as never);
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
       composer.updateArtifacts.mockResolvedValueOnce([
         {
           file: {
@@ -195,12 +262,124 @@ describe('workers/repository/update/branch/get-updated', () => {
       });
     });
 
+    it('for updatedArtifacts passes proper lockFiles', async () => {
+      config.upgrades.push({
+        packageFile: 'composer.json',
+        manager: 'composer',
+        branchName: '',
+      });
+      config.lockFiles = ['different.lock'];
+      config.packageFiles = {
+        composer: [
+          {
+            packageFile: 'composer.json',
+            lockFiles: ['composer.lock'],
+            deps: [],
+          },
+        ] satisfies PackageFile[],
+      };
+      autoReplace.doAutoReplace.mockResolvedValueOnce('some new content');
+      composer.updateArtifacts.mockResolvedValueOnce([
+        {
+          file: {
+            type: 'addition',
+            path: 'composer.lock',
+            contents: 'some contents',
+          },
+        },
+      ]);
+      await getUpdatedPackageFiles(config);
+      expect(composer.updateArtifacts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            lockFiles: ['composer.lock'],
+          }),
+        }),
+      );
+    });
+
+    it('for nonUpdatedArtifacts passes proper lockFiles', async () => {
+      config.upgrades.push({
+        packageFile: 'composer.json',
+        manager: 'composer',
+        branchName: '',
+        isLockfileUpdate: true,
+      });
+      composer.updateLockedDependency.mockReturnValueOnce({
+        status: 'unsupported',
+      });
+      config.lockFiles = ['different.lock'];
+      config.packageFiles = {
+        composer: [
+          {
+            packageFile: 'composer.json',
+            lockFiles: ['composer.lock'],
+            deps: [],
+          },
+        ] satisfies PackageFile[],
+      };
+      composer.updateArtifacts.mockResolvedValueOnce([
+        {
+          file: {
+            type: 'addition',
+            path: 'composer.lock',
+            contents: 'some contents',
+          },
+        },
+      ]);
+      await getUpdatedPackageFiles(config);
+      expect(composer.updateArtifacts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            lockFiles: ['composer.lock'],
+          }),
+        }),
+      );
+    });
+
+    it('for lockFileMaintenance passes proper lockFiles', async () => {
+      config.upgrades.push({
+        manager: 'composer',
+        updateType: 'lockFileMaintenance',
+        packageFile: 'composer.json',
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
+      config.lockFiles = ['different.lock'];
+      config.packageFiles = {
+        composer: [
+          {
+            packageFile: 'composer.json',
+            lockFiles: ['composer.lock'],
+            deps: [],
+          },
+        ] satisfies PackageFile[],
+      };
+      composer.updateArtifacts.mockResolvedValueOnce([
+        {
+          file: {
+            type: 'addition',
+            path: 'composer.json',
+            contents: 'some contents',
+          },
+        },
+      ]);
+      await getUpdatedPackageFiles(config);
+      expect(composer.updateArtifacts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            lockFiles: ['composer.lock'],
+          }),
+        }),
+      );
+    });
+
     it('handles isRemediation success', async () => {
       config.upgrades.push({
         manager: 'npm',
         lockFile: 'package-lock.json',
         isRemediation: true,
-      } as never);
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
       npm.updateLockedDependency.mockResolvedValueOnce({
         status: 'updated',
         files: { 'package-lock.json': 'new contents' },
@@ -222,7 +401,8 @@ describe('workers/repository/update/branch/get-updated', () => {
         manager: 'npm',
         lockFile: 'package-lock.json',
         isRemediation: true,
-      } as never);
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
       npm.updateLockedDependency.mockResolvedValueOnce({
         status: 'unsupported',
       });
@@ -230,6 +410,7 @@ describe('workers/repository/update/branch/get-updated', () => {
       expect(res).toMatchInlineSnapshot(`
         {
           "artifactErrors": [],
+          "artifactNotices": [],
           "reuseExistingBranch": undefined,
           "updatedArtifacts": [],
           "updatedPackageFiles": [],
@@ -241,7 +422,8 @@ describe('workers/repository/update/branch/get-updated', () => {
       config.upgrades.push({
         manager: 'npm',
         isRemediation: true,
-      } as never);
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
       config.reuseExistingBranch = true;
       git.getFile.mockResolvedValueOnce('existing content');
       npm.updateLockedDependency.mockResolvedValue({
@@ -264,7 +446,8 @@ describe('workers/repository/update/branch/get-updated', () => {
       config.upgrades.push({
         manager: 'composer',
         updateType: 'lockFileMaintenance',
-      } as never);
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
       composer.updateArtifacts.mockResolvedValueOnce([
         {
           artifactError: {
@@ -283,6 +466,7 @@ describe('workers/repository/update/branch/get-updated', () => {
       config.reuseExistingBranch = true;
       config.upgrades.push({
         manager: 'composer',
+        packageFile: 'composer.json',
         branchName: '',
       });
       autoReplace.doAutoReplace.mockResolvedValueOnce('some new content');
@@ -305,7 +489,8 @@ describe('workers/repository/update/branch/get-updated', () => {
         packageFile: '.gitmodules',
         manager: 'git-submodules',
         datasource: GitRefsDatasource.id,
-      } as never);
+        branchName: 'some-branch',
+      } satisfies BranchUpgradeConfig);
       gitSubmodules.updateDependency.mockResolvedValueOnce('existing content');
       const res = await getUpdatedPackageFiles(config);
       expect(res).toMatchSnapshot({
@@ -407,6 +592,7 @@ describe('workers/repository/update/branch/get-updated', () => {
       expect(res).toMatchInlineSnapshot(`
         {
           "artifactErrors": [],
+          "artifactNotices": [],
           "reuseExistingBranch": undefined,
           "updatedArtifacts": [],
           "updatedPackageFiles": [],
@@ -430,6 +616,7 @@ describe('workers/repository/update/branch/get-updated', () => {
       expect(res).toMatchInlineSnapshot(`
         {
           "artifactErrors": [],
+          "artifactNotices": [],
           "reuseExistingBranch": false,
           "updatedArtifacts": [],
           "updatedPackageFiles": [],
@@ -455,6 +642,7 @@ describe('workers/repository/update/branch/get-updated', () => {
       expect(res).toMatchInlineSnapshot(`
         {
           "artifactErrors": [],
+          "artifactNotices": [],
           "reuseExistingBranch": false,
           "updatedArtifacts": [],
           "updatedPackageFiles": [],
@@ -468,6 +656,7 @@ describe('workers/repository/update/branch/get-updated', () => {
         branchName: '',
         bumpVersion: 'patch',
         manager: 'npm',
+        packageFileVersion: 'old version',
       });
       npm.updateDependency.mockReturnValue('old version');
       npm.bumpPackageVersion.mockReturnValue({ bumpedContent: 'new version' });
@@ -489,6 +678,7 @@ describe('workers/repository/update/branch/get-updated', () => {
         branchName: '',
         bumpVersion: 'patch',
         manager: 'helmv3',
+        packageFileVersion: '0.0.1',
       });
       autoReplace.doAutoReplace.mockResolvedValueOnce('version: 0.0.1');
       helmv3.bumpPackageVersion.mockReturnValue({
@@ -520,6 +710,26 @@ describe('workers/repository/update/branch/get-updated', () => {
           { path: 'index.html', contents: 'my-new-dep:1.0.0' },
         ],
       });
+    });
+
+    it('handles package files updated by multiple managers', async () => {
+      config.upgrades.push({
+        packageFile: 'pyproject.toml',
+        manager: 'poetry',
+        branchName: '',
+      });
+      config.upgrades.push({
+        packageFile: 'pyproject.toml',
+        manager: 'pep621',
+        branchName: '',
+      });
+      autoReplace.doAutoReplace.mockResolvedValueOnce('my-new-dep:1.0.0');
+      autoReplace.doAutoReplace.mockResolvedValueOnce('my-new-dep:1.0.0');
+
+      await getUpdatedPackageFiles(config);
+
+      expect(pep621.updateArtifacts).toHaveBeenCalledOnce();
+      expect(poetry.updateArtifacts).toHaveBeenCalledOnce();
     });
 
     describe('when some artifacts have changed and others have not', () => {
@@ -560,7 +770,7 @@ describe('workers/repository/update/branch/get-updated', () => {
           await getUpdatedPackageFiles(config);
           expect(bundler.updateArtifacts).toHaveBeenCalledOnce();
           expect(bundler.updateArtifacts).toHaveBeenCalledWith(
-            expect.objectContaining({ newPackageFileContent: 'new contents' })
+            expect.objectContaining({ newPackageFileContent: 'new contents' }),
           );
         });
       });
@@ -576,7 +786,7 @@ describe('workers/repository/update/branch/get-updated', () => {
           await getUpdatedPackageFiles(config);
           expect(bundler.updateArtifacts).toHaveBeenCalledOnce();
           expect(bundler.updateArtifacts).toHaveBeenCalledWith(
-            expect.objectContaining({ newPackageFileContent: 'new contents' })
+            expect.objectContaining({ newPackageFileContent: 'new contents' }),
           );
         });
       });
@@ -595,7 +805,7 @@ describe('workers/repository/update/branch/get-updated', () => {
           await getUpdatedPackageFiles(config);
           expect(bundler.updateArtifacts).toHaveBeenCalledOnce();
           expect(bundler.updateArtifacts).toHaveBeenCalledWith(
-            expect.objectContaining({ newPackageFileContent: newContent })
+            expect.objectContaining({ newPackageFileContent: newContent }),
           );
         });
       });
@@ -614,7 +824,7 @@ describe('workers/repository/update/branch/get-updated', () => {
           await getUpdatedPackageFiles(config);
           expect(bundler.updateArtifacts).toHaveBeenCalledOnce();
           expect(bundler.updateArtifacts).toHaveBeenCalledWith(
-            expect.objectContaining({ newPackageFileContent: newContent })
+            expect.objectContaining({ newPackageFileContent: newContent }),
           );
         });
       });
@@ -635,7 +845,7 @@ describe('workers/repository/update/branch/get-updated', () => {
           await getUpdatedPackageFiles(config);
           expect(bundler.updateArtifacts).toHaveBeenCalledOnce();
           expect(bundler.updateArtifacts).toHaveBeenCalledWith(
-            expect.objectContaining({ newPackageFileContent: 'new contents' })
+            expect.objectContaining({ newPackageFileContent: 'new contents' }),
           );
         });
       });
@@ -656,9 +866,57 @@ describe('workers/repository/update/branch/get-updated', () => {
           await getUpdatedPackageFiles(config);
           expect(bundler.updateArtifacts).toHaveBeenCalledOnce();
           expect(bundler.updateArtifacts).toHaveBeenCalledWith(
-            expect.objectContaining({ newPackageFileContent: 'new contents' })
+            expect.objectContaining({ newPackageFileContent: 'new contents' }),
           );
         });
+      });
+
+      it('passes package files to updateArtifacts in the same order they were returned by the manager', async () => {
+        config.upgrades.push({
+          packageFile: 'requirements-dev.in',
+          manager: 'pip-compile',
+          updateType: 'replacement',
+          depName: 'awscli',
+          currentValue: '==1.32.86',
+          newVersion: '1.32.92',
+          branchName: 'renovate/aws-packages',
+        });
+        config.upgrades.push({
+          packageFile: 'requirements.in',
+          manager: 'pip-compile',
+          updateType: 'replacement',
+          depName: 'botocore',
+          currentValue: '==1.34.86',
+          newVersion: '1.34.92',
+          branchName: 'renovate/aws-packages',
+        });
+        config.packageFiles = {
+          'pip-compile': [
+            {
+              packageFile: 'requirement.in',
+              deps: [],
+            },
+            {
+              packageFile: 'requirements-dev.in',
+              deps: [],
+            },
+          ],
+        };
+
+        pipCompile.updateArtifacts.mockResolvedValue([]);
+        autoReplace.doAutoReplace.mockResolvedValue('new content');
+
+        await getUpdatedPackageFiles(config);
+
+        expect(pipCompile.updateArtifacts).toHaveBeenCalledTimes(2);
+        expect(pipCompile.updateArtifacts).toHaveBeenNthCalledWith(
+          1,
+          expect.objectContaining({ packageFileName: 'requirements.in' }),
+        );
+        expect(pipCompile.updateArtifacts).toHaveBeenNthCalledWith(
+          2,
+          expect.objectContaining({ packageFileName: 'requirements-dev.in' }),
+        );
       });
     });
   });

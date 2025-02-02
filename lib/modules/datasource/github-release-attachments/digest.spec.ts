@@ -1,6 +1,6 @@
-import hasha from 'hasha';
 import * as httpMock from '../../../../test/http-mock';
 import type { GithubDigestFile } from '../../../util/github/types';
+import { toSha256 } from '../../../util/hash';
 import { GitHubReleaseAttachmentMocker } from './test';
 
 import { GithubReleaseAttachmentsDatasource } from '.';
@@ -9,7 +9,7 @@ describe('modules/datasource/github-release-attachments/digest', () => {
   const packageName = 'some/dep';
   const releaseMock = new GitHubReleaseAttachmentMocker(
     'https://api.github.com',
-    packageName
+    packageName,
   );
   const githubReleaseAttachments = new GithubReleaseAttachmentsDatasource();
 
@@ -18,12 +18,12 @@ describe('modules/datasource/github-release-attachments/digest', () => {
       const release = releaseMock.withDigestFileAsset(
         'v1.0.0',
         'test-digest    linux-amd64.tar.gz',
-        'another-digest linux-arm64.tar.gz'
+        'another-digest linux-arm64.tar.gz',
       );
 
       const digestAsset = await githubReleaseAttachments.findDigestAsset(
         release,
-        'test-digest'
+        'test-digest',
       );
       expect(digestAsset?.assetName).toBe('SHASUMS.txt');
       expect(digestAsset?.digestedFileName).toBe('linux-amd64.tar.gz');
@@ -32,7 +32,7 @@ describe('modules/datasource/github-release-attachments/digest', () => {
     it('returns null when not found in digest file asset', async () => {
       const release = releaseMock.withDigestFileAsset(
         'v1.0.0',
-        'another-digest linux-arm64.tar.gz'
+        'another-digest linux-arm64.tar.gz',
       );
       // Small assets like this digest file may be downloaded twice
       httpMock
@@ -42,7 +42,7 @@ describe('modules/datasource/github-release-attachments/digest', () => {
 
       const digestAsset = await githubReleaseAttachments.findDigestAsset(
         release,
-        'test-digest'
+        'test-digest',
       );
       expect(digestAsset).toBeNull();
     });
@@ -55,11 +55,11 @@ describe('modules/datasource/github-release-attachments/digest', () => {
         'asset.zip': content,
         'smallest.zip': '1'.repeat(8 * 1024),
       });
-      const contentDigest = await hasha.async(content, { algorithm: 'sha256' });
+      const contentDigest = toSha256(content);
 
       const digestAsset = await githubReleaseAttachments.findDigestAsset(
         release,
-        contentDigest
+        contentDigest,
       );
       expect(digestAsset?.assetName).toBe('asset.zip');
       expect(digestAsset?.digestedFileName).toBeUndefined();
@@ -69,7 +69,7 @@ describe('modules/datasource/github-release-attachments/digest', () => {
       const release = releaseMock.release('v1.0.0');
       const digestAsset = await githubReleaseAttachments.findDigestAsset(
         release,
-        'test-digest'
+        'test-digest',
       );
       expect(digestAsset).toBeNull();
     });
@@ -87,11 +87,11 @@ describe('modules/datasource/github-release-attachments/digest', () => {
       it('downloads updated digest file', async () => {
         const release = releaseMock.withDigestFileAsset(
           'v1.0.1',
-          'updated-digest  asset.zip'
+          'updated-digest  asset.zip',
         );
         const digest = await githubReleaseAttachments.mapDigestAssetToRelease(
           digestAsset,
-          release
+          release,
         );
         expect(digest).toBe('updated-digest');
       });
@@ -104,11 +104,11 @@ describe('modules/datasource/github-release-attachments/digest', () => {
 
         const release = releaseMock.withDigestFileAsset(
           'v1.0.1',
-          'updated-digest  asset-1.0.1.zip'
+          'updated-digest  asset-1.0.1.zip',
         );
         const digest = await githubReleaseAttachments.mapDigestAssetToRelease(
           digestAssetWithVersion,
-          release
+          release,
         );
         expect(digest).toBe('updated-digest');
       });
@@ -116,11 +116,11 @@ describe('modules/datasource/github-release-attachments/digest', () => {
       it('returns null when not found in digest file', async () => {
         const release = releaseMock.withDigestFileAsset(
           'v1.0.1',
-          'moot-digest asset.tar.gz'
+          'moot-digest asset.tar.gz',
         );
         const digest = await githubReleaseAttachments.mapDigestAssetToRelease(
           digestAsset,
-          release
+          release,
         );
         expect(digest).toBeNull();
       });
@@ -129,7 +129,7 @@ describe('modules/datasource/github-release-attachments/digest', () => {
         const release = releaseMock.release('v1.0.1');
         const digest = await githubReleaseAttachments.mapDigestAssetToRelease(
           digestAsset,
-          release
+          release,
         );
         expect(digest).toBeNull();
       });
@@ -147,13 +147,11 @@ describe('modules/datasource/github-release-attachments/digest', () => {
         const release = releaseMock.withAssets('v1.0.1', {
           'asset.zip': updatedContent,
         });
-        const contentDigest = await hasha.async(updatedContent, {
-          algorithm: 'sha256',
-        });
+        const contentDigest = toSha256(updatedContent);
 
         const digest = await githubReleaseAttachments.mapDigestAssetToRelease(
           digestAsset,
-          release
+          release,
         );
         expect(digest).toEqual(contentDigest);
       });
@@ -162,7 +160,7 @@ describe('modules/datasource/github-release-attachments/digest', () => {
         const release = releaseMock.release('v1.0.1');
         const digest = await githubReleaseAttachments.mapDigestAssetToRelease(
           digestAsset,
-          release
+          release,
         );
         expect(digest).toBeNull();
       });

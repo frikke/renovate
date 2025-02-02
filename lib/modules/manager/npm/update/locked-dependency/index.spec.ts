@@ -1,13 +1,14 @@
 import { updateLockedDependency } from '../..';
 import { Fixtures } from '../../../../../../test/fixtures';
 import * as httpMock from '../../../../../../test/http-mock';
+import { clone } from '../../../../../util/clone';
 import type { UpdateLockedConfig } from '../../../types';
 
 const packageFileContent = Fixtures.get('package.json', './package-lock');
-const lockFileContent = Fixtures.get('package-lock.json', './package-lock');
+const lockFileContent = Fixtures.get('package-lock-v1.json', './package-lock');
 const lockFileV2Content = Fixtures.get(
   'package-lock-v2.json',
-  './package-lock'
+  './package-lock',
 );
 const acceptsJson = Fixtures.getJson('accepts.json', './package-lock');
 const expressJson = Fixtures.get('express.json', './common');
@@ -17,11 +18,11 @@ const sendJson = Fixtures.get('send.json', './package-lock');
 const typeIsJson = Fixtures.getJson('type-is.json', './package-lock');
 const bundledPackageJson = Fixtures.get(
   'bundled.package.json',
-  './package-lock'
+  './package-lock',
 );
 const bundledPackageLockJson = Fixtures.get(
   'bundled.package-lock.json',
-  './package-lock'
+  './package-lock',
 );
 
 describe('modules/manager/npm/update/locked-dependency/index', () => {
@@ -42,10 +43,10 @@ describe('modules/manager/npm/update/locked-dependency/index', () => {
 
     it('validates filename', async () => {
       expect(
-        await updateLockedDependency({ ...config, lockFile: 'yarn.lock' })
+        await updateLockedDependency({ ...config, lockFile: 'yarn.lock' }),
       ).toMatchObject({});
       expect(
-        await updateLockedDependency({ ...config, lockFile: 'yarn.lock2' })
+        await updateLockedDependency({ ...config, lockFile: 'yarn.lock2' }),
       ).toMatchObject({});
     });
 
@@ -54,13 +55,16 @@ describe('modules/manager/npm/update/locked-dependency/index', () => {
         await updateLockedDependency({
           ...config,
           newVersion: '^2.0.0',
-        })
+        }),
       ).toMatchObject({});
     });
 
     it('returns null for unparseable files', async () => {
       expect(
-        await updateLockedDependency({ ...config, lockFileContent: 'not json' })
+        await updateLockedDependency({
+          ...config,
+          lockFileContent: 'not json',
+        }),
       ).toMatchObject({});
     });
 
@@ -69,7 +73,7 @@ describe('modules/manager/npm/update/locked-dependency/index', () => {
         await updateLockedDependency({
           ...config,
           lockFileContent: lockFileContent.replace(': 1,', ': 2,'),
-        })
+        }),
       ).toMatchObject({});
     });
 
@@ -85,7 +89,7 @@ describe('modules/manager/npm/update/locked-dependency/index', () => {
           depName: 'accepts',
           currentVersion: '10.0.0',
           newVersion: '11.0.0',
-        })
+        }),
       ).toMatchObject({});
     });
 
@@ -97,7 +101,7 @@ describe('modules/manager/npm/update/locked-dependency/index', () => {
         newVersion: '1.2.12',
       });
       expect(
-        JSON.parse(res.files!['package-lock.json']).dependencies.mime.version
+        JSON.parse(res.files!['package-lock.json']).dependencies.mime.version,
       ).toBe('1.2.12');
     });
 
@@ -113,7 +117,7 @@ describe('modules/manager/npm/update/locked-dependency/index', () => {
     });
 
     it('fails to remediate if parent dep cannot support', async () => {
-      const acceptsModified = structuredClone(acceptsJson);
+      const acceptsModified = clone(acceptsJson);
       acceptsModified.versions['2.0.0'] = {};
       httpMock
         .scope('https://registry.npmjs.org')
@@ -240,6 +244,12 @@ describe('modules/manager/npm/update/locked-dependency/index', () => {
       config.lockFileContent = bundledPackageLockJson;
       const res = await updateLockedDependency(config);
       expect(res.status).toBe('update-failed');
+    });
+
+    it('rejects in-range remediation if pnpm', async () => {
+      config.lockFile = 'pnpm-lock.yaml';
+      const res = await updateLockedDependency(config);
+      expect(res.status).toBe('unsupported');
     });
   });
 });

@@ -1,4 +1,5 @@
 import is from '@sindresorhus/is';
+import { clone } from '../util/clone';
 import { getOptions } from './options';
 import type { PackageRule, RenovateConfig, UpdateType } from './types';
 
@@ -16,19 +17,16 @@ export function massageConfig(config: RenovateConfig): RenovateConfig {
       }
     });
   }
-  const massagedConfig = structuredClone(config);
+  const massagedConfig = clone(config);
   for (const [key, val] of Object.entries(config)) {
     if (allowedStrings.includes(key) && is.string(val)) {
       massagedConfig[key] = [val];
-    } else if (key === 'npmToken' && is.string(val) && val.length < 50) {
-      massagedConfig.npmrc = `//registry.npmjs.org/:_authToken=${val}\n`;
-      delete massagedConfig.npmToken;
     } else if (is.array(val)) {
       massagedConfig[key] = [];
       val.forEach((item) => {
         if (is.object(item)) {
           (massagedConfig[key] as RenovateConfig[]).push(
-            massageConfig(item as RenovateConfig)
+            massageConfig(item as RenovateConfig),
           );
         } else {
           (massagedConfig[key] as unknown[]).push(item);
@@ -52,10 +50,10 @@ export function massageConfig(config: RenovateConfig): RenovateConfig {
       newRules.push(rule);
       for (const [key, val] of Object.entries(rule) as [
         UpdateType,
-        PackageRule
+        PackageRule,
       ][]) {
         if (updateTypes.includes(key)) {
-          let newRule = structuredClone(rule);
+          let newRule = clone(rule);
           Object.keys(newRule).forEach((newKey) => {
             if (!(newKey.startsWith(`match`) || newKey.startsWith('exclude'))) {
               delete newRule[newKey];
@@ -76,7 +74,7 @@ export function massageConfig(config: RenovateConfig): RenovateConfig {
     newRules = newRules.filter((rule) => {
       if (
         Object.keys(rule).every(
-          (key) => key.startsWith('match') || key.startsWith('exclude')
+          (key) => key.startsWith('match') || key.startsWith('exclude'),
         )
       ) {
         // Exclude rules which contain only match or exclude options

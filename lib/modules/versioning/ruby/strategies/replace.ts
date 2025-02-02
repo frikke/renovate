@@ -1,6 +1,7 @@
 import { logger } from '../../../../logger';
 import { EQUAL, GT, GTE, LT, LTE, NOT_EQUAL, PGTE } from '../operator';
-import { Range, parseRanges, satisfiesRange, stringifyRanges } from '../range';
+import type { Range } from '../range';
+import { parseRanges, satisfiesRange, stringifyRanges } from '../range';
 import { adapt, decrement, floor, increment } from '../version';
 
 // Common logic for replace, widen, and bump strategies
@@ -31,7 +32,7 @@ export function replacePart(part: Range, to: string): Range {
       return part;
     // istanbul ignore next
     default:
-      logger.warn(`Unsupported operator '${operator}'`);
+      logger.warn({ operator }, `Unsupported ruby versioning operator`);
       return { operator: '', delimiter: ' ', version: '' };
   }
 }

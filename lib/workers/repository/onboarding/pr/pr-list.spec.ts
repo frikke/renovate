@@ -1,19 +1,21 @@
-import { RenovateConfig, getConfig } from '../../../../../test/util';
+import type { RenovateConfig } from '../../../../../test/util';
+import { partial } from '../../../../../test/util';
 import type { BranchConfig } from '../../../types';
-import { getPrList } from './pr-list';
+import { getExpectedPrList } from './pr-list';
 
 describe('workers/repository/onboarding/pr/pr-list', () => {
-  describe('getPrList()', () => {
+  describe('getExpectedPrList()', () => {
     let config: RenovateConfig;
 
     beforeEach(() => {
-      jest.resetAllMocks();
-      config = getConfig();
+      config = partial<RenovateConfig>({
+        prHourlyLimit: 2, // default
+      });
     });
 
     it('handles empty', () => {
       const branches: BranchConfig[] = [];
-      const res = getPrList(config, branches);
+      const res = getExpectedPrList(config, branches);
       expect(res).toMatchInlineSnapshot(`
         "
         ### What to Expect
@@ -35,11 +37,12 @@ describe('workers/repository/onboarding/pr/pr-list', () => {
             {
               manager: 'some-manager',
               updateType: 'lockFileMaintenance',
-            } as never,
+              branchName: 'some-branch',
+            },
           ],
         },
       ];
-      const res = getPrList(config, branches);
+      const res = getExpectedPrList(config, branches);
       expect(res).toMatchInlineSnapshot(`
         "
         ### What to Expect
@@ -98,12 +101,13 @@ describe('workers/repository/onboarding/pr/pr-list', () => {
               depType: 'devDependencies',
               newValue: '2.0.1',
               isLockfileUpdate: true,
-            } as never,
+              branchName: 'some-branch',
+            },
           ],
         },
       ];
       config.prHourlyLimit = 1;
-      const res = getPrList(config, branches);
+      const res = getExpectedPrList(config, branches);
       expect(res).toMatchInlineSnapshot(`
         "
         ### What to Expect
@@ -130,7 +134,7 @@ describe('workers/repository/onboarding/pr/pr-list', () => {
 
         </details>
 
-        <br />
+
 
         🚸 Branch creation will be limited to maximum 1 per hour, so it doesn't swamp any CI resources or overwhelm the project. See docs for \`prhourlylimit\` for details.
 

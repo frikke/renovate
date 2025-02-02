@@ -18,8 +18,8 @@ Renovate's approach is to ensure that automerging branches are up-to-date with t
 This means merging multiple branches in a row won't work reliably, so we prefer not to do that.
 What all this means is that Renovate will only automerge at most one branch/PR per target branch per run, before you need to wait for the next run.
 
-As a general guide, we recommend that you enable automerge for any type of dependency updates where you would just select "merge" anyway.
-For any updates where you want to review the release notes - or code - before you merge, you can keep automerge disabled.
+As a general guide, we recommend that you enable automerge for any type of dependency updates where you would select "merge" anyway.
+For any updates where you want to review the changelogs - or code - before you merge, you can keep automerge disabled.
 
 Automerge works particularly well for `devDependencies` as well as for production `dependencies` in projects which have great test coverage.
 
@@ -27,7 +27,7 @@ For example, if you have Jest or Mocha as a development dependency, and it has a
 If you have a linter like ESLint or TSLint and its update passes... automerge them!
 If you have an API with 100% test coverage and Express is updated... automerge it!
 
-![Automerged PR](/assets/images/automerged-pr.png){ loading=lazy }
+![Automerged PR](../assets/images/automerged-pr.png){ loading=lazy }
 
 ## Configuration examples
 
@@ -35,9 +35,8 @@ If you have an API with 100% test coverage and Express is updated... automerge i
 
 The lowest risk type of update to automerge is probably `lockFileMaintenance`.
 When Renovate performs lock file maintenance, it leaves the project dependency definitions unchanged, but refreshes the lock file completely so that the latest versions according to the package file constraints are installed.
-Here is an example of automerging lock file maintenance:
 
-```json
+```json title="Example of automerging lock file maintenance"
 {
   "lockFileMaintenance": {
     "enabled": true,
@@ -52,12 +51,12 @@ Automerging lint tool updates can be a real time-saver.
 Sometimes an update to a lint tool or plugin definition causes tests to fail, and that is usually deliberate/intentional because the lint authors have added a new rule that you need to adhere to.
 But in many cases the new version(s) will pass tests, and if so then there's really nothing else to consider before merging, so they may as well be automerged:
 
-```json
+```json title="Example of automerging lint and Prettier development packages"
 {
   "packageRules": [
     {
       "matchDepTypes": ["devDependencies"],
-      "matchPackagePatterns": ["lint", "prettier"],
+      "matchPackageNames": ["lint", "prettier"],
       "automerge": true
     }
   ]
@@ -68,7 +67,7 @@ But in many cases the new version(s) will pass tests, and if so then there's rea
 
 Non-major updates in SemVer ecosystems shouldn't have breaking changes (if they follow the spec), so many users enable automerge for these too:
 
-```json
+```json title="Example of automerging non-major updates in SemVer ecosystem"
 {
   "packageRules": [
     {
@@ -86,7 +85,7 @@ The `matchCurrentVersion` setting above is a rule to exclude any dependencies wh
 
 Say you want to automerge `patch` and `minor` updates for packages in the `group:ionic-nativeMonorepo` preset:
 
-```json
+```json title="Example of automerging patch and minor updates in a group from a preset"
 {
   "packageRules": [
     {
@@ -100,24 +99,21 @@ Say you want to automerge `patch` and `minor` updates for packages in the `group
 
 ### Faster merges with platform-native automerge
 
-You can speed up merges by letting Renovate use your platform's native automerge.
-The config option is called `platformAutomerge`.
-If `automerge=true` and `automergeType=pr` then you can set `platformAutomerge=true`.
+By default, Renovate uses platform-native automerge to speed up automerging.
+If you don't want Renovate to use the platform-native automerge, then set `platformAutomerge` to `false`.
 
-For example:
-
-```json
+```json title="Example of disabling platform-native automerge"
 {
   "lockFileMaintenance": {
     "enabled": true,
     "automerge": true,
     "automergeType": "pr",
-    "platformAutomerge": true
+    "platformAutomerge": false
   }
 }
 ```
 
-For more information read [`platformAutomerge`](https://docs.renovatebot.com/configuration-options/#platformautomerge).
+For more information read [`platformAutomerge`](../configuration-options.md#platformautomerge).
 
 ### GitHub Merge Queue
 
@@ -132,11 +128,6 @@ The steps to enable GitHub's Merge Queue differ based on whether you use GitHub 
     GitHub has a page that shows all the PRs in the Merge Queue.
     The page link follows this pattern: `https://github.com/organization-name/repository-name/queue/base-branch-name`.
     For example, here's [Renovate's main repository's Merge Queue overview](https://github.com/renovatebot/renovate/queue/main).
-
-<!-- prettier-ignore -->
-!!! warning "GitHub Merge Queue is in beta"
-    GitHub's Merge Queue feature is labeled as a beta feature by GitHub.
-    The Merge Queue may stop working, have bugs, or you may need to update your configuration when GitHub changes things.
 
 #### If you use GitHub Actions
 
@@ -155,11 +146,10 @@ On `github.com`, go to your repository's "homepage", click on Settings, scroll d
 Then go to your repository's branch protection rules for your base branch (usually `main`) and enable the "Require merge queue" setting.
 Confirm you've set the correct "required checks" for your base branch.
 
-Finally, allow Renovate to automerge by setting `automerge=true` and `platformAutomerge=true` in your Renovate config file, for example:
+Finally, allow Renovate to automerge by setting `automerge=true` in your Renovate config file, for example:
 
 ```json
 {
-  "platformAutomerge": true,
   "packageRules": [
     {
       "description": "Automerge non-major updates",
@@ -180,7 +170,7 @@ On `github.com`, go to your repository's "homepage", click on Settings, scroll d
 Go to your repository's branch protection rules for your base branch (usually `main`) and enable the "Require merge queue" setting.
 Confirm you've set the correct "required checks" for your base branch.
 
-Finally, allow Renovate to automerge by setting `automerge=true` and `platformAutomerge=true` in your Renovate config file (see earlier example).
+Finally, allow Renovate to automerge by setting `automerge=true` in your Renovate config file (see earlier example).
 
 ## Automerging and scheduling
 
@@ -250,7 +240,7 @@ If you have mandatory Pull Request reviews then it means Renovate can't automerg
 
 If you're on `github.com` or GitHub Enterprise Server (`>=3.4`) you can let Renovate bypass the mandatory Pull Request reviews using the "[Allow specified actors to bypass required pull requests](https://github.blog/changelog/2021-11-19-allow-bypassing-required-pull-requests/)" option in your branch protection rules.
 
-Alternatively, if you are running the hosted Mend Renovate App on `github.com`, you can also install the helper apps [renovate-approve](https://github.com/apps/renovate-approve) and [renovate-approve-2](https://github.com/apps/renovate-approve-2) and they will mark all automerging Pull Requests by Renovate as approved.
+Alternatively, if you use the Mend Renovate App, you can also install the helper apps [renovate-approve](https://github.com/apps/renovate-approve) and [renovate-approve-2](https://github.com/apps/renovate-approve-2) and they will mark all automerging Pull Requests by Renovate as approved.
 These approval helper apps are only available for GitHub.
 
 ### Codeowners
@@ -273,7 +263,7 @@ To turn off automerge for all dependencies of a selected repository, you need to
   "extends": ["local>org-name/.github:renovate-config"],
   "packageRules": [
     {
-      "matchPackagePatterns": ["*"],
+      "matchPackageNames": ["*"],
       "automerge": false
     }
   ]

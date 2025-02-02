@@ -1,10 +1,6 @@
 import { mock } from 'jest-mock-extended';
-import {
-  RenovateConfig,
-  getConfig,
-  partial,
-  platform,
-} from '../../../test/util';
+import type { RenovateConfig } from '../../../test/util';
+import { partial, platform } from '../../../test/util';
 import { GlobalConfig } from '../../config/global';
 import { CONFIG_VALIDATION } from '../../constants/error-messages';
 import { logger } from '../../logger';
@@ -19,8 +15,12 @@ jest.mock('../../modules/platform');
 let config: RenovateConfig;
 
 beforeEach(() => {
-  jest.resetAllMocks();
-  config = getConfig();
+  // default values
+  config = partial<RenovateConfig>({
+    onboardingBranch: 'configure/renovate',
+    configWarningReuseIssue: true,
+    confidential: false,
+  });
 });
 
 describe('workers/repository/error-config', () => {
@@ -29,12 +29,26 @@ describe('workers/repository/error-config', () => {
       GlobalConfig.reset();
     });
 
+    it('returns if mode is silent', async () => {
+      config.mode = 'silent';
+
+      const res = await raiseConfigWarningIssue(
+        config,
+        new Error(CONFIG_VALIDATION),
+      );
+
+      expect(res).toBeUndefined();
+      expect(logger.debug).toHaveBeenCalledWith(
+        'Config warning issues are not created, updated or closed when mode=silent',
+      );
+    });
+
     it('creates issues', async () => {
       const expectedBody = `There are missing credentials for the authentication-required feature. As a precaution, Renovate will pause PRs until it is resolved.
 
 Location: \`package.json\`
 Error type: some-error
-Message: \`some-message\`
+Message: some-message
 `;
       const error = new Error(CONFIG_VALIDATION);
       error.validationSource = 'package.json';
@@ -47,10 +61,10 @@ Message: \`some-message\`
       expect(res).toBeUndefined();
       expect(logger.warn).toHaveBeenCalledWith(
         { configError: error, res: 'created' },
-        'Configuration Warning'
+        'Configuration Warning',
       );
       expect(platform.ensureIssue).toHaveBeenCalledWith(
-        expect.objectContaining({ body: expectedBody })
+        expect.objectContaining({ body: expectedBody }),
       );
     });
 
@@ -66,7 +80,7 @@ Message: \`some-message\`
       expect(res).toBeUndefined();
       expect(logger.info).toHaveBeenCalledWith(
         { configError: error },
-        'DRY-RUN: Would ensure configuration error issue'
+        'DRY-RUN: Would ensure configuration error issue',
       );
     });
 
@@ -85,7 +99,7 @@ Message: \`some-message\`
 
       expect(res).toBeUndefined();
       expect(platform.updatePr).toHaveBeenCalledWith(
-        expect.objectContaining({ prTitle: pr.title, number: pr.number })
+        expect.objectContaining({ prTitle: pr.title, number: pr.number }),
       );
     });
 
@@ -104,7 +118,7 @@ Message: \`some-message\`
 
       expect(res).toBeUndefined();
       expect(logger.info).toHaveBeenCalledWith(
-        `DRY-RUN: Would update PR #${pr.number}`
+        `DRY-RUN: Would update PR #${pr.number}`,
       );
     });
 
@@ -113,7 +127,6 @@ Message: \`some-message\`
       const error = new Error(CONFIG_VALIDATION);
       error.validationSource = 'package.json';
       error.validationMessage = 'some-message';
-      // config.suppressNotifications = ['deprecationWarningIssues']
       config.suppressNotifications = [notificationName];
       platform.getBranchPr.mockResolvedValueOnce({
         ...mock<Pr>(),
@@ -126,7 +139,7 @@ Message: \`some-message\`
       expect(res).toBeUndefined();
       expect(logger.info).toHaveBeenCalledWith(
         { notificationName },
-        'Configuration failure, issues will be suppressed'
+        'Configuration failure, issues will be suppressed',
       );
     });
   });

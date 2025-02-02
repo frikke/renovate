@@ -1,17 +1,18 @@
 import is from '@sindresorhus/is';
 import { logger } from '../../logger';
 import type { PackageFile } from '../../modules/manager/types';
+import { clone } from '../../util/clone';
 
 export class PackageFiles {
   private static data = new Map<string, Record<string, PackageFile[]> | null>();
 
   static add(
     baseBranch: string,
-    packageFiles: Record<string, PackageFile[]> | null
+    packageFiles: Record<string, PackageFile[]> | null,
   ): void {
     logger.debug(
       { baseBranch },
-      `PackageFiles.add() - Package file saved for base branch`
+      `PackageFiles.add() - Package file saved for base branch`,
     );
     this.data.set(baseBranch, packageFiles);
   }
@@ -32,7 +33,7 @@ export class PackageFiles {
    */
   static getDashboardMarkdown(maxLength: number, setHeader = true): string {
     const note =
-      '> **Note**\n> Detected dependencies section has been truncated\n';
+      '> ℹ **Note**\n> \n> Detected dependencies section has been truncated\n\n';
     const title = `## Detected dependencies\n\n`;
 
     // exclude header length from the available space
@@ -44,7 +45,7 @@ export class PackageFiles {
     let removed = false;
     let truncated = false;
 
-    const data = new Map(structuredClone(Array.from(this.data)));
+    const data = new Map(clone(Array.from(this.data)));
 
     // filter all deps with skip reason
     for (const managers of [...data.values()].filter(is.truthy)) {
@@ -78,7 +79,7 @@ export class PackageFiles {
    * @param data
    */
   private static getDashboardMarkdownInternal(
-    data: Map<string, Record<string, PackageFile[]> | null>
+    data: Map<string, Record<string, PackageFile[]> | null>,
   ): string {
     const none = 'None detected\n\n';
     const pad = data.size > 1; // padding condition for a multi base branch repo
@@ -110,7 +111,7 @@ export class PackageFiles {
             const digest = dep.currentDigest;
             const version =
               ver && digest ? `${ver}@${digest}` : `${digest ?? ver!}`;
-            // TODO: types (#7154)
+            // TODO: types (#22198)
             deps += ` - \`${dep.depName!} ${version}\`\n`;
           }
           deps += '\n</details>\n\n';
@@ -131,7 +132,7 @@ export class PackageFiles {
    *          otherwise false is returned
    */
   private static pop(
-    data: Map<string, Record<string, PackageFile[]> | null>
+    data: Map<string, Record<string, PackageFile[]> | null>,
   ): boolean {
     // get detected managers list of the last listed base branch
     const [branch, managers] = Array.from(data).pop() ?? [];

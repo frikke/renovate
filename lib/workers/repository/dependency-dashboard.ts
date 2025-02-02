@@ -1,14 +1,15 @@
 import is from '@sindresorhus/is';
-import { nameFromLevel } from 'bunyan';
 import { GlobalConfig } from '../../config/global';
 import type { RenovateConfig } from '../../config/types';
-import { getProblems, logger } from '../../logger';
+import { logger } from '../../logger';
 import type { PackageFile } from '../../modules/manager/types';
 import { platform } from '../../modules/platform';
-import { GitHubMaxPrBodyLen } from '../../modules/platform/github';
 import { regEx } from '../../util/regex';
+import { coerceString } from '../../util/string';
 import * as template from '../../util/template';
 import type { BranchConfig, SelectAllConfig } from '../types';
+import { extractRepoProblems } from './common';
+import type { ConfigMigrationResult } from './config-migration';
 import { getDepWarningsDashboard } from './errors-warnings';
 import { PackageFiles } from './package-files';
 import type { Vulnerability } from './process/types';
@@ -23,16 +24,16 @@ interface DependencyDashboard {
 
 const rateLimitedRe = regEx(
   ' - \\[ \\] <!-- unlimit-branch=([^\\s]+) -->',
-  'g'
+  'g',
 );
 const pendingApprovalRe = regEx(
   ' - \\[ \\] <!-- approve-branch=([^\\s]+) -->',
-  'g'
+  'g',
 );
 const generalBranchRe = regEx(' <!-- ([a-zA-Z]+)-branch=([^\\s]+) -->');
 const markedBranchesRe = regEx(
   ' - \\[x\\] <!-- ([a-zA-Z]+)-branch=([^\\s]+) -->',
-  'g'
+  'g',
 );
 
 function checkOpenAllRateLimitedPR(issueBody: string): boolean {
@@ -45,6 +46,24 @@ function checkApproveAllPendingPR(issueBody: string): boolean {
 
 function checkRebaseAll(issueBody: string): boolean {
   return issueBody.includes(' - [x] <!-- rebase-all-open-prs -->');
+}
+
+function getConfigMigrationCheckboxState(
+  issueBody: string,
+): 'no-checkbox' | 'checked' | 'unchecked' | 'migration-pr-exists' {
+  if (issueBody.includes('<!-- config-migration-pr-info -->')) {
+    return 'migration-pr-exists';
+  }
+
+  if (issueBody.includes(' - [x] <!-- create-config-migration-pr -->')) {
+    return 'checked';
+  }
+
+  if (issueBody.includes(' - [ ] <!-- create-config-migration-pr -->')) {
+    return 'unchecked';
+  }
+
+  return 'no-checkbox';
 }
 
 function selectAllRelevantBranches(issueBody: string): string[] {
@@ -64,7 +83,7 @@ function selectAllRelevantBranches(issueBody: string): string[] {
 
 function getAllSelectedBranches(
   issueBody: string,
-  dependencyDashboardChecks: Record<string, string>
+  dependencyDashboardChecks: Record<string, string>,
 ): Record<string, string> {
   const allRelevantBranches = selectAllRelevantBranches(issueBody);
   for (const branch of allRelevantBranches) {
@@ -81,7 +100,7 @@ function getCheckedBranches(issueBody: string): Record<string, string> {
   }
   dependencyDashboardChecks = getAllSelectedBranches(
     issueBody,
-    dependencyDashboardChecks
+    dependencyDashboardChecks,
   );
   return dependencyDashboardChecks;
 }
@@ -92,6 +111,8 @@ function parseDashboardIssue(issueBody: string): DependencyDashboard {
   const dependencyDashboardAllPending = checkApproveAllPendingPR(issueBody);
   const dependencyDashboardAllRateLimited =
     checkOpenAllRateLimitedPR(issueBody);
+  dependencyDashboardChecks['configMigrationCheckboxState'] =
+    getConfigMigrationCheckboxState(issueBody);
   return {
     dependencyDashboardChecks,
     dependencyDashboardRebaseAllOpen,
@@ -101,12 +122,17 @@ function parseDashboardIssue(issueBody: string): DependencyDashboard {
 }
 
 export async function readDashboardBody(
-  config: SelectAllConfig
+  config: SelectAllConfig,
 ): Promise<void> {
-  config.dependencyDashboardChecks = {};
+  let dashboardChecks: DependencyDashboard = {
+    dependencyDashboardChecks: {},
+    dependencyDashboardAllPending: false,
+    dependencyDashboardRebaseAllOpen: false,
+    dependencyDashboardAllRateLimited: false,
+  };
   const stringifiedConfig = JSON.stringify(config);
   if (
-    config.dependencyDashboard ||
+    config.dependencyDashboard === true ||
     stringifiedConfig.includes('"dependencyDashboardApproval":true') ||
     stringifiedConfig.includes('"prCreation":"approval"')
   ) {
@@ -115,37 +141,34 @@ export async function readDashboardBody(
     const issue = await platform.findIssue(config.dependencyDashboardTitle);
     if (issue) {
       config.dependencyDashboardIssue = issue.number;
-      const dashboardChecks = parseDashboardIssue(issue.body!);
-
-      if (config.checkedBranches) {
-        const checkedBranchesRec: Record<string, string> = Object.fromEntries(
-          config.checkedBranches.map((branchName) => [
-            branchName,
-            'global-config',
-          ])
-        );
-        dashboardChecks.dependencyDashboardChecks = {
-          ...dashboardChecks.dependencyDashboardChecks,
-          ...checkedBranchesRec,
-        };
-      }
-
-      Object.assign(config, dashboardChecks);
+      dashboardChecks = parseDashboardIssue(issue.body ?? '');
     }
   }
+
+  if (config.checkedBranches) {
+    const checkedBranchesRec: Record<string, string> = Object.fromEntries(
+      config.checkedBranches.map((branchName) => [branchName, 'global-config']),
+    );
+    dashboardChecks.dependencyDashboardChecks = {
+      ...dashboardChecks.dependencyDashboardChecks,
+      ...checkedBranchesRec,
+    };
+  }
+
+  Object.assign(config, dashboardChecks);
 }
 
 function getListItem(branch: BranchConfig, type: string): string {
   let item = ' - [ ] ';
   item += `<!-- ${type}-branch=${branch.branchName} -->`;
   if (branch.prNo) {
-    // TODO: types (#7154)
+    // TODO: types (#22198)
     item += `[${branch.prTitle!}](../pull/${branch.prNo})`;
   } else {
     item += branch.prTitle;
   }
   const uniquePackages = [
-    // TODO: types (#7154)
+    // TODO: types (#22198)
     ...new Set(branch.upgrades.map((upgrade) => `\`${upgrade.depName!}\``)),
   ];
   if (uniquePackages.length < 2) {
@@ -156,25 +179,14 @@ function getListItem(branch: BranchConfig, type: string): string {
 
 function appendRepoProblems(config: RenovateConfig, issueBody: string): string {
   let newIssueBody = issueBody;
-  const repoProblems = new Set(
-    getProblems()
-      .filter(
-        (problem) =>
-          problem.repository === config.repository && !problem.artifactErrors
-      )
-      .map(
-        (problem) =>
-          `${nameFromLevel[problem.level].toUpperCase()}: ${problem.msg}`
-      )
-  );
+  const repoProblems = extractRepoProblems(config.repository);
   if (repoProblems.size) {
-    logger.debug(
-      { repoProblems: Array.from(repoProblems) },
-      'repository problems'
-    );
     newIssueBody += '## Repository problems\n\n';
-    newIssueBody +=
-      'These problems occurred while renovating this repository.\n\n';
+    const repoProblemsHeader =
+      config.customizeDashboard?.['repoProblemsHeader'] ??
+      'Renovate tried to run on this repository, but found these problems.';
+    newIssueBody += template.compile(repoProblemsHeader, config) + '\n\n';
+
     for (const repoProblem of repoProblems) {
       newIssueBody += ` - ${repoProblem}\n`;
     }
@@ -186,31 +198,40 @@ function appendRepoProblems(config: RenovateConfig, issueBody: string): string {
 export async function ensureDependencyDashboard(
   config: SelectAllConfig,
   allBranches: BranchConfig[],
-  packageFiles: Record<string, PackageFile[]> = {}
+  packageFiles: Record<string, PackageFile[]> = {},
+  configMigrationRes: ConfigMigrationResult,
 ): Promise<void> {
+  logger.debug('ensureDependencyDashboard()');
+  if (config.mode === 'silent') {
+    logger.debug(
+      'Dependency Dashboard issue is not created, updated or closed when mode=silent',
+    );
+    return;
+  }
   // legacy/migrated issue
   const reuseTitle = 'Update Dependencies (Renovate Bot)';
   const branches = allBranches.filter(
     (branch) =>
       branch.result !== 'automerged' &&
-      !branch.upgrades?.every((upgrade) => upgrade.remediationNotPossible)
+      !branch.upgrades?.every((upgrade) => upgrade.remediationNotPossible),
   );
   if (
     !(
-      config.dependencyDashboard ||
-      config.dependencyDashboardApproval ||
-      config.packageRules?.some((rule) => rule.dependencyDashboardApproval) ||
+      config.dependencyDashboard === true ||
+      config.dependencyDashboardApproval === true ||
+      config.packageRules?.some((rule) => rule.dependencyDashboardApproval) ===
+        true ||
       branches.some(
         (branch) =>
           !!branch.dependencyDashboardApproval ||
-          !!branch.dependencyDashboardPrApproval
+          !!branch.dependencyDashboardPrApproval,
       )
     )
   ) {
     if (GlobalConfig.get('dryRun')) {
       logger.info(
         { title: config.dependencyDashboardTitle },
-        'DRY-RUN: Would close Dependency Dashboard'
+        'DRY-RUN: Would close Dependency Dashboard',
       );
     } else {
       logger.debug('Closing Dependency Dashboard');
@@ -224,12 +245,35 @@ export async function ensureDependencyDashboard(
     return;
   }
   logger.debug('Ensuring Dependency Dashboard');
+
+  // Check packageFiles for any deprecations
+  let hasDeprecations = false;
+  const deprecatedPackages: Record<string, Record<string, boolean>> = {};
+  logger.debug('Checking packageFiles for deprecated packages');
+  if (is.nonEmptyObject(packageFiles)) {
+    for (const [manager, fileNames] of Object.entries(packageFiles)) {
+      for (const fileName of fileNames) {
+        for (const dep of fileName.deps) {
+          const name = dep.packageName ?? dep.depName;
+          const hasReplacement = !!dep.updates?.find(
+            (updates) => updates.updateType === 'replacement',
+          );
+          if (name && (dep.deprecationMessage ?? hasReplacement)) {
+            hasDeprecations = true;
+            deprecatedPackages[manager] ??= {};
+            deprecatedPackages[manager][name] ??= hasReplacement;
+          }
+        }
+      }
+    }
+  }
+
   const hasBranches = is.nonEmptyArray(branches);
-  if (config.dependencyDashboardAutoclose && !hasBranches) {
+  if (config.dependencyDashboardAutoclose && !hasBranches && !hasDeprecations) {
     if (GlobalConfig.get('dryRun')) {
       logger.info(
         { title: config.dependencyDashboardTitle },
-        'DRY-RUN: Would close Dependency Dashboard'
+        'DRY-RUN: Would close Dependency Dashboard',
       );
     } else {
       logger.debug('Closing Dependency Dashboard');
@@ -238,15 +282,50 @@ export async function ensureDependencyDashboard(
     return;
   }
   let issueBody = '';
+
   if (config.dependencyDashboardHeader?.length) {
     issueBody +=
       template.compile(config.dependencyDashboardHeader, config) + '\n\n';
   }
 
+  if (configMigrationRes.result === 'pr-exists') {
+    issueBody +=
+      '## Config Migration Needed\n\n' +
+      `<!-- config-migration-pr-info --> See Config Migration PR: #${configMigrationRes.prNumber}.\n\n`;
+  } else if (configMigrationRes?.result === 'pr-modified') {
+    issueBody +=
+      '## Config Migration Needed (error)\n\n' +
+      `<!-- config-migration-pr-info --> The Config Migration branch exists but has been modified by another user. Renovate will not push to this branch unless it is first deleted. \n\n See Config Migration PR: #${configMigrationRes.prNumber}.\n\n`;
+  } else if (configMigrationRes?.result === 'add-checkbox') {
+    issueBody +=
+      '## Config Migration Needed\n\n' +
+      ' - [ ] <!-- create-config-migration-pr --> Select this checkbox to let Renovate create an automated Config Migration PR.' +
+      '\n\n';
+  }
+
   issueBody = appendRepoProblems(config, issueBody);
 
+  if (hasDeprecations) {
+    issueBody += '> ⚠ **Warning**\n> \n';
+    issueBody += 'These dependencies are deprecated:\n\n';
+    issueBody += '| Datasource | Name | Replacement PR? |\n';
+    issueBody += '|------------|------|--------------|\n';
+    for (const manager of Object.keys(deprecatedPackages).sort()) {
+      const deps = deprecatedPackages[manager];
+      for (const depName of Object.keys(deps).sort()) {
+        const hasReplacement = deps[depName];
+        issueBody += `| ${manager} | \`${depName}\` | ${
+          hasReplacement
+            ? '![Available](https://img.shields.io/badge/available-green?style=flat-square)'
+            : '![Unavailable](https://img.shields.io/badge/unavailable-orange?style=flat-square)'
+        } |\n`;
+      }
+    }
+    issueBody += '\n';
+  }
+
   const pendingApprovals = branches.filter(
-    (branch) => branch.result === 'needs-approval'
+    (branch) => branch.result === 'needs-approval',
   );
   if (pendingApprovals.length) {
     issueBody += '## Pending Approval\n\n';
@@ -262,7 +341,7 @@ export async function ensureDependencyDashboard(
     issueBody += '\n';
   }
   const awaitingSchedule = branches.filter(
-    (branch) => branch.result === 'not-scheduled'
+    (branch) => branch.result === 'not-scheduled',
   );
   if (awaitingSchedule.length) {
     issueBody += '## Awaiting Schedule\n\n';
@@ -277,7 +356,7 @@ export async function ensureDependencyDashboard(
     (branch) =>
       branch.result === 'branch-limit-reached' ||
       branch.result === 'pr-limit-reached' ||
-      branch.result === 'commit-limit-reached'
+      branch.result === 'commit-limit-reached',
   );
   if (rateLimited.length) {
     issueBody += '## Rate-Limited\n\n';
@@ -304,7 +383,7 @@ export async function ensureDependencyDashboard(
     issueBody += '\n';
   }
   const awaitingPr = branches.filter(
-    (branch) => branch.result === 'needs-pr-approval'
+    (branch) => branch.result === 'needs-pr-approval',
   );
   if (awaitingPr.length) {
     issueBody += '## PR Creation Approval Required\n\n';
@@ -334,7 +413,7 @@ export async function ensureDependencyDashboard(
     issueBody += '\n';
   }
   const prPendingBranchAutomerge = branches.filter(
-    (branch) => branch.prBlockedBy === 'BranchAutomerge'
+    (branch) => branch.prBlockedBy === 'BranchAutomerge',
   );
   if (prPendingBranchAutomerge.length) {
     issueBody += '## Pending Branch Automerge\n\n';
@@ -345,7 +424,7 @@ export async function ensureDependencyDashboard(
     issueBody += '\n';
   }
 
-  const warn = getDepWarningsDashboard(packageFiles);
+  const warn = getDepWarningsDashboard(packageFiles, config);
   if (warn) {
     issueBody += warn;
     issueBody += '\n';
@@ -367,10 +446,10 @@ export async function ensureDependencyDashboard(
   let inProgress = branches.filter(
     (branch) =>
       !otherRes.includes(branch.result!) &&
-      branch.prBlockedBy !== 'BranchAutomerge'
+      branch.prBlockedBy !== 'BranchAutomerge',
   );
   const otherBranches = inProgress.filter(
-    (branch) => !!branch.prBlockedBy || !branch.prNo
+    (branch) => !!branch.prBlockedBy || !branch.prNo,
   );
   // istanbul ignore if
   if (otherBranches.length) {
@@ -382,7 +461,7 @@ export async function ensureDependencyDashboard(
     issueBody += '\n';
   }
   inProgress = inProgress.filter(
-    (branch) => branch.prNo && !branch.prBlockedBy
+    (branch) => branch.prNo && !branch.prBlockedBy,
   );
   if (inProgress.length) {
     issueBody += '## Open\n\n';
@@ -400,7 +479,7 @@ export async function ensureDependencyDashboard(
     issueBody += '\n';
   }
   const alreadyExisted = branches.filter(
-    (branch) => branch.result === 'already-existed'
+    (branch) => branch.result === 'already-existed',
   );
   if (alreadyExisted.length) {
     issueBody += '## Ignored or Blocked\n\n';
@@ -423,19 +502,31 @@ export async function ensureDependencyDashboard(
   // fit the detected dependencies section
   const footer = getFooter(config);
   issueBody += PackageFiles.getDashboardMarkdown(
-    GitHubMaxPrBodyLen - issueBody.length - footer.length
+    platform.maxBodyLength() - issueBody.length - footer.length,
   );
 
   issueBody += footer;
 
   if (config.dependencyDashboardIssue) {
+    // If we're not changing the dashboard issue then we can skip checking if the user changed it
+    // The cached issue we get back here will reflect its state at the _start_ of our run
+    const cachedIssue = await platform.getIssue?.(
+      config.dependencyDashboardIssue,
+    );
+    if (cachedIssue?.body === issueBody) {
+      logger.debug('No changes to dependency dashboard issue needed');
+      return;
+    }
+
+    // Skip cache when getting the issue to ensure we get the latest body,
+    // including any updates the user made after we started the run
     const updatedIssue = await platform.getIssue?.(
       config.dependencyDashboardIssue,
-      false
+      false,
     );
     if (updatedIssue) {
       const { dependencyDashboardChecks } = parseDashboardIssue(
-        updatedIssue.body!
+        coerceString(updatedIssue.body),
       );
       for (const branchName of Object.keys(config.dependencyDashboardChecks!)) {
         delete dependencyDashboardChecks[branchName];
@@ -444,7 +535,7 @@ export async function ensureDependencyDashboard(
         const checkText = `- [ ] <!-- ${dependencyDashboardChecks[branchName]}-branch=${branchName} -->`;
         issueBody = issueBody.replace(
           checkText,
-          checkText.replace('[ ]', '[x]')
+          checkText.replace('[ ]', '[x]'),
         );
       }
     }
@@ -453,7 +544,7 @@ export async function ensureDependencyDashboard(
   if (GlobalConfig.get('dryRun')) {
     logger.info(
       { title: config.dependencyDashboardTitle },
-      'DRY-RUN: Would ensure Dependency Dashboard'
+      'DRY-RUN: Would ensure Dependency Dashboard',
     );
   } else {
     await platform.ensureIssue({
@@ -480,7 +571,7 @@ function getFooter(config: RenovateConfig): string {
 
 export async function getDashboardMarkdownVulnerabilities(
   config: RenovateConfig,
-  packageFiles: Record<string, PackageFile[]>
+  packageFiles: Record<string, PackageFile[]>,
 ): Promise<string> {
   let result = '';
 
@@ -496,7 +587,7 @@ export async function getDashboardMarkdownVulnerabilities(
   const vulnerabilityFetcher = await Vulnerabilities.create();
   const vulnerabilities = await vulnerabilityFetcher.fetchVulnerabilities(
     config,
-    packageFiles
+    packageFiles,
   );
 
   if (vulnerabilities.length === 0) {
@@ -506,7 +597,7 @@ export async function getDashboardMarkdownVulnerabilities(
   }
 
   const unresolvedVulnerabilities = vulnerabilities.filter((value) =>
-    is.nullOrUndefined(value.fixedVersion)
+    is.nullOrUndefined(value.fixedVersion),
   );
   const resolvedVulnerabilitiesLength =
     vulnerabilities.length - unresolvedVulnerabilities.length;
@@ -543,20 +634,20 @@ export async function getDashboardMarkdownVulnerabilities(
     }
     if (
       is.nullOrUndefined(
-        managerRecords[manager!][packageFile][vulnerability.packageName]
+        managerRecords[manager!][packageFile][vulnerability.packageName],
       )
     ) {
       managerRecords[manager!][packageFile][vulnerability.packageName] = [];
     }
     managerRecords[manager!][packageFile][vulnerability.packageName].push(
-      vulnerability
+      vulnerability,
     );
   }
 
   for (const [manager, packageFileRecords] of Object.entries(managerRecords)) {
     result += `<details><summary>${manager}</summary>\n<blockquote>\n\n`;
     for (const [packageFile, packageNameRecords] of Object.entries(
-      packageFileRecords
+      packageFileRecords,
     )) {
       result += `<details><summary>${packageFile}</summary>\n<blockquote>\n\n`;
       for (const [packageName, cves] of Object.entries(packageNameRecords)) {

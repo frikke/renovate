@@ -1,3 +1,4 @@
+import { mockDeep } from 'jest-mock-extended';
 import { getPkgReleases } from '..';
 import { Fixtures } from '../../../../test/fixtures';
 import * as httpMock from '../../../../test/http-mock';
@@ -7,7 +8,7 @@ import * as composerVersioning from '../../versioning/composer';
 import { id as versioning } from '../../versioning/loose';
 import { PackagistDatasource } from '.';
 
-jest.mock('../../../util/host-rules');
+jest.mock('../../../util/host-rules', () => mockDeep());
 
 const hostRules = _hostRules;
 
@@ -24,7 +25,6 @@ describe('modules/datasource/packagist/index', () => {
     let config: any;
 
     beforeEach(() => {
-      jest.resetAllMocks();
       hostRules.find = jest.fn((input: HostRule) => input);
       hostRules.hosts = jest.fn(() => []);
       config = {
@@ -163,7 +163,7 @@ describe('modules/datasource/packagist/index', () => {
         .get('/packages.json')
         .reply(200, packagesJson)
         .get(
-          '/include/all$093530b127abe74defbf21affc9589bf713e4e08f898bf11986842f9956eda86.json'
+          '/include/all$093530b127abe74defbf21affc9589bf713e4e08f898bf11986842f9956eda86.json',
         )
         .reply(200, includesJson);
       const res = await getPkgReleases({
@@ -304,11 +304,11 @@ describe('modules/datasource/packagist/index', () => {
         .get('/packages.json')
         .reply(200, packagesJson)
         .get(
-          '/p/providers-2018-09$14346045d7a7261cb3a12a6b7a1a7c4151982530347b115e5e277d879cad1942.json'
+          '/p/providers-2018-09$14346045d7a7261cb3a12a6b7a1a7c4151982530347b115e5e277d879cad1942.json',
         )
         .reply(200, fileJson)
         .get(
-          '/p/wpackagist-plugin/1beyt$b574a802b5bf20a58c0f027e73aea2a75d23a6f654afc298a8dc467331be316a.json'
+          '/p/wpackagist-plugin/1beyt$b574a802b5bf20a58c0f027e73aea2a75d23a6f654afc298a8dc467331be316a.json',
         )
         .reply(200, beytJson);
       const res = await getPkgReleases({
@@ -349,7 +349,7 @@ describe('modules/datasource/packagist/index', () => {
         .get('/packages.json')
         .reply(200, packagesJson)
         .get(
-          '/p/providers-2018-09$14346045d7a7261cb3a12a6b7a1a7c4151982530347b115e5e277d879cad1942.json'
+          '/p/providers-2018-09$14346045d7a7261cb3a12a6b7a1a7c4151982530347b115e5e277d879cad1942.json',
         )
         .reply(200, fileJson);
       httpMock
@@ -389,7 +389,7 @@ describe('modules/datasource/packagist/index', () => {
         .get('/packages.json')
         .reply(200, packagesJson)
         .get(
-          '/p/wpackagist-plugin/1beyt$b574a802b5bf20a58c0f027e73aea2a75d23a6f654afc298a8dc467331be316a.json'
+          '/p/wpackagist-plugin/1beyt$b574a802b5bf20a58c0f027e73aea2a75d23a6f654afc298a8dc467331be316a.json',
         )
         .reply(200, beytJson);
       const res = await getPkgReleases({
@@ -483,7 +483,7 @@ describe('modules/datasource/packagist/index', () => {
           datasource,
           versioning,
           packageName: 'drewm/mailchimp-api',
-        })
+        }),
       ).toMatchSnapshot();
     });
 
@@ -503,7 +503,7 @@ describe('modules/datasource/packagist/index', () => {
           datasource,
           versioning,
           packageName: 'drewm/mailchimp-api',
-        })
+        }),
       ).toMatchSnapshot();
     });
 
@@ -540,6 +540,52 @@ describe('modules/datasource/packagist/index', () => {
       expect(res).toEqual({
         registryUrl: 'https://example.com',
         releases: [{ gitRef: 'v2.5.4', version: '2.5.4' }],
+      });
+    });
+
+    it('respects "available-packages" list', async () => {
+      httpMock
+        .scope('https://example.com')
+        .get('/packages.json')
+        .twice()
+        .reply(200, {
+          'metadata-url': 'https://example.com/p2/%package%.json',
+          'available-packages': ['foo/bar'],
+        })
+        .get('/p2/foo/bar.json')
+        .reply(200, {
+          minified: 'composer/2.0',
+          packages: {
+            'foo/bar': [
+              {
+                name: 'foo/bar',
+                version: 'v1.2.3',
+              },
+            ],
+          },
+        })
+        .get('/p2/foo/bar~dev.json')
+        .reply(404);
+      config.registryUrls = ['https://example.com'];
+
+      const foo = await getPkgReleases({
+        ...config,
+        datasource,
+        versioning,
+        packageName: 'foo/foo',
+      });
+      expect(foo).toBeNull();
+
+      const bar = await getPkgReleases({
+        ...config,
+        datasource,
+        versioning,
+        packageName: 'foo/bar',
+      });
+
+      expect(bar).toEqual({
+        registryUrl: 'https://example.com',
+        releases: [{ gitRef: 'v1.2.3', version: '1.2.3' }],
       });
     });
   });

@@ -17,6 +17,7 @@ export interface NpmResponseVersion {
   gitHead?: string;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  engines?: Record<string, string>;
 }
 
 export interface NpmResponse {
@@ -34,6 +35,7 @@ export interface NpmResponse {
 
 export interface CachedReleaseResult extends ReleaseResult {
   cacheData?: {
+    revision?: number;
     etag: string | undefined;
     softExpireAt: string;
   };

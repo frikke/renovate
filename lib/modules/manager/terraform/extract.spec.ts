@@ -40,10 +40,21 @@ describe('modules/manager/terraform/extract', () => {
       expect(await extractPackageFile('nothing here', '1.tf', {})).toBeNull();
     });
 
+    it('returns null for no deps', async () => {
+      // ModuleExtractor matches `module` at any position.
+      const src = codeBlock`
+        data "sops_file" "secrets" {
+          source_file = "\${path.module}/secrets.enc.json"
+        }
+        `;
+
+      expect(await extractPackageFile(src, '1.tf', {})).toBeNull();
+    });
+
     it('extracts  modules', async () => {
       const res = await extractPackageFile(modules, 'modules.tf', {});
-      expect(res?.deps).toHaveLength(18);
-      expect(res?.deps.filter((dep) => dep.skipReason)).toHaveLength(2);
+      expect(res?.deps).toHaveLength(19);
+      expect(res?.deps.filter((dep) => dep.skipReason)).toHaveLength(3);
       expect(res?.deps).toIncludeAllPartialMembers([
         {
           packageName: 'hashicorp/example',
@@ -159,9 +170,21 @@ describe('modules/manager/terraform/extract', () => {
           datasource: 'terraform-module',
         },
         {
+          depName: 'relative',
+          depType: 'module',
+          currentValue: undefined,
           skipReason: 'local',
         },
         {
+          depName: 'relative',
+          depType: 'module',
+          currentValue: undefined,
+          skipReason: 'local',
+        },
+        {
+          depName: 'nosauce',
+          depType: 'module',
+          currentValue: undefined,
           skipReason: 'no-source',
         },
       ]);
@@ -256,7 +279,7 @@ describe('modules/manager/terraform/extract', () => {
       const res = await extractPackageFile(
         azureDevOpsModules,
         'modules.tf',
-        {}
+        {},
       );
       expect(res?.deps).toHaveLength(3);
       expect(res?.deps).toIncludeAllPartialMembers([
@@ -433,7 +456,8 @@ describe('modules/manager/terraform/extract', () => {
             'hub.proxy.test/bitnami/nginx:{{#if newValue}}{{newValue}}{{/if}}{{#if newDigest}}@{{newDigest}}{{/if}}',
           currentValue: '1.24.0',
           datasource: 'docker',
-          depName: 'index.docker.io/bitnami/nginx',
+          depName: 'hub.proxy.test/bitnami/nginx',
+          packageName: 'index.docker.io/bitnami/nginx',
           depType: 'docker_image',
           replaceString: 'hub.proxy.test/bitnami/nginx:1.24.0',
         },
@@ -660,7 +684,7 @@ describe('modules/manager/terraform/extract', () => {
       const res = await extractPackageFile(
         lockedVersion,
         'lockedVersion.tf',
-        {}
+        {},
       );
       expect(res?.deps).toHaveLength(3);
       expect(res?.deps.filter((dep) => dep.skipReason)).toHaveLength(0);
@@ -696,7 +720,7 @@ describe('modules/manager/terraform/extract', () => {
       const res = await extractPackageFile(
         terraformBlock,
         'terraformBlock.tf',
-        {}
+        {},
       );
       expect(res?.deps).toHaveLength(1);
       expect(res?.deps.filter((dep) => dep.skipReason)).toHaveLength(0);
@@ -716,7 +740,7 @@ describe('modules/manager/terraform/extract', () => {
       const res = await extractPackageFile(
         tfeWorkspaceBlock,
         'tfeWorkspace.tf',
-        {}
+        {},
       );
       expect(res?.deps).toHaveLength(3);
       expect(res?.deps.filter((dep) => dep.skipReason)).toHaveLength(1);
@@ -747,7 +771,7 @@ describe('modules/manager/terraform/extract', () => {
           resource my provider
         `,
         'tfeWorkspace.tf',
-        {}
+        {},
       );
       expect(res).toBeNull();
     });
